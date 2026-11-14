@@ -78,7 +78,7 @@ apklab setup --plan          # show official sources/checksums; do not install t
 apklab setup --install       # opt in to attempting installation through APT
 ```
 
-`doctor` searches PATH, `ANDROID_SDK_ROOT`, `ANDROID_HOME`, `~/Android/Sdk`, and `GHIDRA_HOME` for Ghidra. `--check` runs short version/help probes for supported tools and reports unsuccessful or unsupported probes as `not_tested`. Finding an executable or receiving a successful version response **does not prove** full functionality. For example, package metadata requires `aapt` and signature verification requires `apksigner`.
+`doctor` searches PATH, `ANDROID_SDK_ROOT`, `ANDROID_HOME`, the Windows `LOCALAPPDATA` SDK location, `~/Android/Sdk`, and `GHIDRA_HOME` for Ghidra. `--check` runs short version/help probes for supported tools and reports unsuccessful or unsupported probes as `not_tested`. Finding an executable or receiving a successful version response **does not prove** full functionality. For example, package metadata requires `aapt` and signature verification requires `apksigner`.
 
 `setup --plan` provides official download URLs, SHA-256 comparison instructions, and Debian/Ubuntu, Termux/Android and macOS guidance. SDK tools are not guaranteed to run on Termux. If an upstream digest is unavailable, integrity remains unverified. `setup --install` is for Debian/Ubuntu-based systems and modifies the system: it runs `apt-get update`, attempts to install missing packages, and checks for their executables. Review the APT sources and plan first. It requires root or passwordless sudo; failures are reported per package. JADX, the full SDK, the emulator, and Ghidra are not installed automatically.
 
@@ -86,7 +86,7 @@ If needed, install tools from official sources and verify provided checksums/sig
 
 - [Android SDK command-line tools and build tools](https://developer.android.com/studio#command-line-tools-only): `aapt`, `zipalign`, `apksigner`, emulator, and ADB.
 - [apktool](https://apktool.org/), [JADX](https://github.com/skylot/jadx), [Eclipse Temurin Java](https://adoptium.net/), and [Ghidra](https://github.com/NationalSecurityAgency/ghidra).
-- `readelf` from the system toolchain is optional for native headers and dependencies. APKLab runs JADX only when explicitly requested with `work jadx`; it detects Ghidra but does not invoke it.
+- `readelf` from the system toolchain is optional for native headers and dependencies. APKLab runs JADX only when explicitly requested with `jadx` or `work jadx`; it detects Ghidra but does not invoke it.
 
 Tool availability depends on the system and network. SDK installation, acceptance of SDK licenses, and device configuration are not automated.
 
@@ -221,9 +221,9 @@ Most tests use synthetic APK/DEX files and mocks for metadata, signing, and exte
 APKLAB_INTEGRATION_APK=/path/to/authorized-test.apk python3 -m unittest discover -s tests -p test_integration.py -v
 ```
 
-Without `APKLAB_INTEGRATION_APK`, this test is skipped. When enabled, missing required tools cause failure. Set `APKLAB_TEST_16K=1`, `APKLAB_TEST_JADX=1`, or `APKLAB_TEST_SPLITS=1` to opt into the corresponding checks; the split test uses two copies of one APK, not a genuine split set. `APKLAB_EMULATOR_SERIAL=emulator-5554` additionally installs and launches the test APK on that emulator. Only use a disposable, isolated emulator.
+Without `APKLAB_INTEGRATION_APK`, this test is skipped. When enabled, missing required tools cause failure. Set `APKLAB_TEST_16K=1`, `APKLAB_TEST_JADX=1`, or `APKLAB_TEST_SPLITS=1` to opt into the corresponding checks. The split option requires `ANDROID_HOME` with an installed platform `android.jar`; it generates and signs separate synthetic base and `config.en` APKs, checks their reported identities and runs the split workflow. This does not establish that the split set installs or works on a device. `APKLAB_EMULATOR_SERIAL=emulator-5554` additionally installs and launches the test APK on that emulator. Only use a disposable, isolated emulator.
 
-GitHub Actions is configured for cross-platform unit tests, real Android tools, and a disposable-emulator test using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. CI has successfully exercised JADX, a 16 KiB ZIP-aligned native entry, the multi-copy workflow, XAPK repacking, and installation and a launcher event on an API 30 emulator. The multi-copy fixture is not a genuine split set. Consult the current workflow results for the latest status; installing or launching a sample does not prove that another APK or game will work.
+GitHub Actions is configured for cross-platform unit tests, real Android tools, and a disposable-emulator test using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. An earlier CI run exercised JADX, a 16 KiB ZIP-aligned native entry, a two-copy workflow, XAPK repacking, and installation and a launcher event on an API 30 emulator. The split integration fixture has since changed; consult the current workflow results before claiming the updated fixture passed. installing or launching a sample does not prove that another APK or game will work.
 
 ## License
 
