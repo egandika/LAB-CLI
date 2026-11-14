@@ -7,6 +7,7 @@
 - Validate APK ZIP structure consistently, report partial manifest output, and stage workspace and XAPK outputs before publication.
 - Preserve partial reports, document page-size verification behavior, and include bounded JADX diagnostics.
 - Improve SDK tool discovery, ZIP ignore patterns, and synthetic regression coverage.
+- Pin GitHub Actions to full commit hashes; runtime downloads remain separate dependencies.
 
 These checks do not prove APK installability, ELF segment alignment, split completeness, or runtime behavior. Process cleanup is not a sandbox. The Android-tool and split integration paths require independent real-tool testing.
 
