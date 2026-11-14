@@ -24,13 +24,13 @@ apklab --help
 apklab doctor
 ```
 
-The GitHub command is not yet tested for this version: it cannot install changes that have not been merged into the default branch. Once published, prefer a reviewed commit SHA or a release tag over a mutable branch. Venv activation above is for Unix; on Windows use `.venv\Scripts\activate`. The CLI has no runtime Python dependencies; pip's build isolation obtains setuptools from the configured package index. No APK or external tool is bundled.
+The GitHub command was tested with version 0.1.0 on the default branch. It cannot install newer changes until they are merged there. Once published, prefer a reviewed commit SHA or a release tag over a mutable branch. Venv activation above is for Unix; on Windows use `.venv\Scripts\activate`. The CLI has no runtime Python dependencies; pip's build isolation obtains setuptools from the configured package index. No APK or external tool is bundled.
 
 ### Prompt untuk percakapan AI baru
 
 Setelah perubahan masuk ke branch utama, salin prompt berikut ke percakapan baru dan berikan APK yang berwenang Anda analisis:
 
-> Instal APKLab dengan `python -m pip install 'git+https://github.com/egad13744-collab/LAB-CLI.git'` dalam virtual environment. Baca README dan AGENTS.md, jalankan `apklab --help` dan `apklab doctor`, lalu bantu analisis APK saya pada salinannya. Pisahkan hasil terverifikasi, dugaan, kegagalan, dan yang belum diuji. Jangan instal atau hubungkan REA tanpa rencana dan persetujuan saya.
+> Instal APKLab dengan `python -m pip install 'git+https://github.com/egad13744-collab/LAB-CLI.git'` dalam virtual environment. Baca README dan AGENTS.md, jalankan `apklab --help` dan `apklab doctor`, lalu bantu analisis APK/XAPK saya pada salinannya. Pisahkan hasil terverifikasi, dugaan, kegagalan, dan yang belum diuji. Jangan instal atau hubungkan layanan eksternal tanpa rencana dan persetujuan saya.
 
 ## Discover and install tools
 
@@ -55,18 +55,22 @@ Availability varies by OS, SDK layout, and network. `setup` does not install JAD
 ```sh
 apklab inspect app.apk
 apklab inspect base.apk split_config.arm64_v8a.apk
-apklab inspect ./split-directory --report inspection.json
+apklab inspect ./split-directory --recursive --report inspection.json
+apklab xapk inspect game.xapk --verify
+apklab xapk unpack game.xapk ./xapk-copy
+apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 apklab inventory app.apk --search lib --native-details
 apklab dex app.apk --search 'login' --limit 50
 apklab dex app.apk --report dex-report.json
 ```
 
-- `inspect` checks ZIP CRCs, native ABI directory names, and AndroidManifest presence. It invokes **aapt** for package and version metadata and **apksigner verify** for signature verification; unavailable tools are reported as `not_tested`, not as passing. A directory expands `*.apk` only; `.apks` containers are not automatically unpacked. Multiple APKs are individually inspected and differing known package names/version codes flagged; complete split compatibility, signer equality, base selection, missing splits, and installation are **not** checked.
+- `inspect` checks ZIP CRCs, native ABI directory names, and AndroidManifest presence. It invokes **aapt** for package/version metadata and **apksigner verify** for signatures; unavailable tools are `not_tested`. Directories are searched one level by default, or recursively with `--recursive`. Known package names, version codes, and verified signer certificate SHA-256 digest sets are compared between supplied APKs; any unavailable comparison is `not_tested`. Matching digests are not proof of split compatibility, and differing digests are not a complete signing-rotation compatibility analysis. Base selection, missing splits, dependencies, device compatibility, and installation are **not** checked. `.apks` containers are not unpacked.
+- `xapk inspect` lists archive paths and sizes; `--verify` streams every file, checks ZIP CRC and reports SHA-256. `xapk unpack` copies entries into a **new** directory and checks CRC/hashes as it writes. It rejects traversal, duplicate/colliding paths, links, special files, encrypted entries, and size-limit violations. The source archive is only read, not modified. For an optional root `manifest.json` with a supported `split_apks` list, APK file references are compared with archive names; other manifest layouts are reported as untested. Manifest completeness, inner APK contents and OBB compatibility are not validated; inspect extracted APKs separately. A manifest warning or failure can be reported after extraction has completed, leaving the copied directory in place. Extracting consumes disk space and may take time. XAPK formats vary; repacking, installing, device-specific split selection and placing OBB files are not implemented.
 - `inventory` lists `assets/`, `res/`, and `lib/<abi>/*.so` paths and uncompressed sizes. `--search` filters paths, not content. `--native-details` invokes `readelf -h -d` if available, not full native reverse engineering.
 - `dex` indexes DEX class definitions, method ID references (including references not necessarily called), common API references, string literals and literal HTTP(S) URLs. Model names are a naming heuristic; they are **not** extracted schema definitions. `--search` filters results; `--limit` caps each returned list. Names may be obfuscated, strings encrypted, endpoints assembled dynamically, DEX loaded remotely, and code may reside in native libraries. This is not a decompiler or call graph. Use JADX/Ghidra separately when needed.
-- ZIP limits: at most 100,000 entries, 64 MiB per entry and 512 MiB total uncompressed. Larger legitimate APKs are rejected rather than processed. CRC is not signature verification or a security guarantee. Files are not extracted by these analysis commands.
+- APK ZIP defaults: at most 100,000 entries, 64 MiB per entry and 512 MiB total uncompressed. Override the size limits explicitly with `--max-entry-mib` and `--max-total-mib` on `inspect`, `inventory`, and `dex` for larger trusted inputs. Larger limits can consume substantial memory (especially DEX/native analysis), CPU, and disk. XAPK defaults are 2,048 MiB per entry and 8,192 MiB total; the same options are available after `xapk inspect` or `xapk unpack`. CRC is not signature verification or a security guarantee. Other analysis commands do not extract files.
 
-All command output is JSON with `verified`, `inferences`, `failures`, and `not_tested`. `verified` means the stated check happened, not that the app is safe or functional. Exit code 1 indicates a reported failure, 0 means no failures, **not** that every check was run. `--report FILE` writes a new report and refuses to overwrite an existing file; for `work`, place `--report` immediately after `work`. Reports may contain sensitive app strings, endpoints, and file paths: inspect/redact before sharing or committing.
+All command output is JSON with `verified`, `inferences`, `failures`, and `not_tested`. `verified` means the stated check happened, not that the app is safe or functional. Exit code 1 indicates a reported failure, 0 means no failures, **not** that every check was run. `--report FILE` writes a new report and refuses to overwrite an existing file; for `work` and `xapk`, place `--report` immediately after that command, before the subcommand. Reports may contain sensitive app strings, endpoints, and file paths: inspect/redact before sharing or committing.
 
 ## Copy-based modification workflow
 

@@ -71,21 +71,26 @@ def emit(r, output=None):
     print(text)
 
 
-def zip_infos(z):
+def zip_infos(z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
+    if max_entry < 1 or max_total < 1:
+        raise ValueError('ZIP size limits must be positive')
     infos = z.infolist()
-    if len(infos) > 100000 or sum(i.file_size for i in infos) > MAX_TOTAL:
-        raise ValueError("ZIP exceeds safety limits (100000 entries or 512 MiB uncompressed)")
-    if any(i.file_size > MAX_ENTRY for i in infos):
-        raise ValueError("ZIP entry exceeds 64 MiB safety limit")
+    if len(infos) > 100000 or sum(i.file_size for i in infos) > max_total:
+        raise ValueError("ZIP exceeds entry count or total uncompressed size limit")
+    if any(i.file_size > max_entry for i in infos):
+        raise ValueError("ZIP entry exceeds uncompressed size limit")
     return infos
 
 
-def inspect_one(path, r):
+def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     path = Path(path)
-    item = {"file": str(path), "package": None, "version_name": None, "version_code": None, "architectures": []}
+    item = {"file": str(path), "package": None, "version_name": None, "version_code": None, "architectures": [], "signer_sha256": None}
+    if path.suffix.lower() == '.xapk':
+        add(r, "failures", str(path), "XAPK is an archive, not an APK; use apklab xapk inspect or unpack")
+        return item
     try:
         with zipfile.ZipFile(path) as z:
-            infos = zip_infos(z)
+            infos = zip_infos(z, max_entry, max_total)
             bad = z.testzip()
             if bad:
                 add(r, "failures", str(path), "ZIP CRC failure: " + bad)
@@ -103,10 +108,11 @@ def inspect_one(path, r):
     if tool:
         result = run([tool, "dump", "badging", path])
         if result["returncode"] == 0:
-            match = re.search(r"package: name='([^']+)' versionCode='([^']*)' versionName='([^']*)'", result["stdout"])
-            if match:
-                item.update(package=match.group(1), version_code=match.group(2), version_name=match.group(3))
-                add(r, "verified", str(path), "Package and version read with aapt")
+            line = next((line for line in result["stdout"].splitlines() if line.startswith('package:')), '')
+            attrs = dict(re.findall(r"([\w]+)='([^']*)'", line))
+            if attrs.get('name') and attrs.get('versionCode'):
+                item.update(package=attrs['name'], version_code=attrs['versionCode'], version_name=attrs.get('versionName'), split=attrs.get('split'))
+                add(r, "verified", str(path), "Package and version code read with aapt")
             else:
                 add(r, "failures", str(path), "aapt returned no parseable package metadata")
         else:
@@ -117,7 +123,12 @@ def inspect_one(path, r):
     if signer:
         result = run([signer, "verify", "--verbose", "--print-certs", path])
         if result["returncode"] == 0:
+            digests = re.findall(r'^Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F:]+)\s*$', result['stdout'], re.MULTILINE)
+            if digests and all(len(d.replace(':', '')) == 64 for d in digests):
+                item['signer_sha256'] = sorted({d.replace(':', '').lower() for d in digests})
             add(r, "verified", str(path), "apksigner verification passed: " + result["stdout"][:4000])
+            if item['signer_sha256'] is None:
+                add(r, "not_tested", str(path), "Signer certificate digest could not be parsed")
         else:
             add(r, "failures", str(path), "apksigner verification failed: " + (result["stderr"] or result["stdout"])[:2000])
     else:
