@@ -134,6 +134,12 @@ def assess_outputs(records):
             for ref in refs:
                 if ref not in present:
                     issues.append('Missing declared split dependency: ' + ref + ' (member ' + record['id'] + ')')
+    # isSplitRequired is an application-level requirement, not a list of split names.
+    # A known base requiring splits with no named split cannot satisfy it.
+    if names_known and len(names) == 1 and names[0] is None:
+        dep = records[0].get('dependencies', {})
+        if dep.get('status') == 'observed' and dep.get('is_split_required') is True:
+            issues.append('Base manifest requires at least one split APK, but none was supplied')
     if not dependencies_known:
         unknown.extend(['dependency declarations', 'versionCodeMajor'])
     else:

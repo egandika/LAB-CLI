@@ -145,6 +145,14 @@ def inspect(args, _report):
         if not all(a.get('package') and 'split' in a for a in r['apks']):
             add(r, 'not_tested', 'split names', 'Metadata unavailable for one or more APKs')
         add(r, 'not_tested', 'split set', 'Completeness, split dependencies, signer rotation compatibility and installation not verified')
+    observations = []
+    for item in r['apks']:
+        observations.append({'id': item['file'], 'apk': item, 'dependencies': read_dependencies(item['file'])})
+    r['split_observations'] = observations
+    r['split_analysis'] = assess_outputs(observations)
+    for issue in r['split_analysis']['issues']: add(r, 'failures', 'split set', issue)
+    for unknown in r['split_analysis']['unknown']:
+        add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
     if args.device_abi:
         present = sorted({abi for apk in r['apks'] for abi in apk['architectures']})
         r['abi_observation'] = {'requested': args.device_abi, 'native_directories': present}
@@ -209,9 +217,11 @@ def xapk(args, _report):
                 if not sep or not name or not replacement or name in replacements:
                     raise ValueError('Each --replace must be a unique ENTRY=FILE pair')
                 replacements[name] = replacement
-            entries = (repack_directory(args.archive, staged, replacements, entry, total)
-                       if args.directory else repack_xapk(args.archive, staged, replacements, entry, total))
+            entries = (repack_directory(args.archive, staged, replacements, entry, total, update_manifest=args.update_manifest)
+                       if args.directory else repack_xapk(args.archive, staged, replacements, entry, total, update_manifest=args.update_manifest))
             describe(entries, staged / 'repacked.xapk' if args.directory else staged)
+            if args.update_manifest:
+                add(r, 'verified', 'XAPK manifest', 'Updated size and SHA-256 fields for replaced APK entries in supported split_apks manifest')
             if r['failures']: return r
             publish_new(staged, destination, directory=args.directory)
             add(r, 'verified', 'XAPK', 'Copied validated ZIP entries to a new archive; replacement APK ZIP CRCs were checked')
@@ -516,6 +526,7 @@ def parser():
         elif action == 'repack':
             x.add_argument('destination', help='New output archive; parent must exist')
             x.add_argument('--directory', action='store_true', help='Create new directory with repacked.xapk and manifest-validated OBB layout')
+            x.add_argument('--update-manifest', action='store_true', help='Update size and sha256 in supported split_apks entries for replacements')
             x.add_argument('--replace', action='append', default=[], metavar='ENTRY=APK', help='Replace an existing APK entry; repeat as needed')
         else: x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')

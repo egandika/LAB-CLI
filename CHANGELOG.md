@@ -2,6 +2,7 @@
 
 ## 0.5.0 (unreleased)
 
+- Inspect explicit split dependencies and optionally update supported XAPK manifest size/SHA-256 fields for replacements.
 - Report recognizable DEX 041 containers as not tested per entry and reject malformed container headers; cache repeated string offsets.
 - Add bounded internal binary-AXML literal metadata fallback, a doctor feature/tool table, and broader setup-plan guidance.
 

@@ -136,7 +136,7 @@ def manifest_info(path, entries, directory=False):
             'duplicate_references': sorted(x for x, count in Counter(filenames).items() if count > 1)}
 
 
-def repack(path, destination, replacements, max_entry, max_total):
+def repack(path, destination, replacements, max_entry, max_total, *, update_manifest=False):
     """Copy a validated archive into a new XAPK, optionally replacing APK entries."""
     import copy
     from .core import validate_apk_archive
@@ -157,7 +157,40 @@ def repack(path, destination, replacements, max_entry, max_total):
                     validate_apk_archive(p, apk, max_entry, max_total)
                 except ValueError as exc:
                     raise ValueError('Replacement APK: ' + str(exc)) from exc
-        total = sum(Path(replacements[i.filename]).stat().st_size if i.filename in replacements else i.file_size for i in infos)
+        updated_manifest = None
+        replacement_hashes = {}
+        if update_manifest:
+            if not replacements: raise ValueError('--update-manifest requires at least one replacement')
+            manifest = files.get('manifest.json')
+            if manifest is None or manifest.file_size > MIB: raise ValueError('A supported manifest.json within 1 MiB is required')
+            def unique_object(pairs):
+                obj = {}
+                for key, value in pairs:
+                    if key in obj: raise ValueError('Duplicate JSON key in manifest: ' + key)
+                    obj[key] = value
+                return obj
+            try: data = json.loads(source.read(manifest).decode('utf-8'), object_pairs_hook=unique_object)
+            except (UnicodeError, ValueError) as exc: raise ValueError('Invalid manifest.json: ' + str(exc)) from exc
+            declarations = data.get('split_apks') if isinstance(data, dict) else None
+            if not isinstance(declarations, list) or not all(isinstance(x, dict) and isinstance(x.get('file'), str) for x in declarations):
+                raise ValueError('Unsupported manifest split_apks schema')
+            for name, replacement in replacements.items():
+                matches = [item for item in declarations if item['file'] == name]
+                if len(matches) != 1: raise ValueError('Each replacement must have exactly one split_apks declaration: ' + name)
+                item = matches[0]
+                if any(key.lower() in ('checksum', 'md5', 'sha1', 'sha512', 'hash') for key in item):
+                    raise ValueError('Unsupported additional checksum field in manifest: ' + name)
+                digest = hashlib.sha256(); size = 0
+                with open(replacement, 'rb') as source_apk:
+                    for chunk in iter(lambda: source_apk.read(CHUNK), b''):
+                        size += len(chunk)
+                        if size > max_entry: raise ValueError('Replacement APK exceeds entry size limit')
+                        digest.update(chunk)
+                replacement_hashes[name] = (size, digest.hexdigest())
+                item['size'] = size; item['sha256'] = digest.hexdigest()
+            updated_manifest = (json.dumps(data, ensure_ascii=True, indent=2) + '\n').encode('utf-8')
+            if len(updated_manifest) > MIB or len(updated_manifest) > max_entry: raise ValueError('Updated manifest exceeds size limit')
+        total = sum(len(updated_manifest) if i.filename == 'manifest.json' and updated_manifest is not None else Path(replacements[i.filename]).stat().st_size if i.filename in replacements else i.file_size for i in infos)
         if total > max_total: raise ValueError('Repacked archive exceeds total size limit')
         if any(Path(p).stat().st_size > max_entry for p in replacements.values()):
             raise ValueError('Replacement APK exceeds entry size limit')
@@ -167,12 +200,15 @@ def repack(path, destination, replacements, max_entry, max_total):
                     items = summarize(infos)
                     for info, item in zip(infos, items):
                         new_info = copy.copy(info)
-                        new_info.file_size = Path(replacements[info.filename]).stat().st_size if info.filename in replacements else info.file_size
+                        new_info.file_size = len(updated_manifest) if info.filename == 'manifest.json' and updated_manifest is not None else Path(replacements[info.filename]).stat().st_size if info.filename in replacements else info.file_size
                         if info.is_dir():
                             output.writestr(new_info, b'')
                         else:
                             with output.open(new_info, 'w') as target:
-                                if info.filename not in replacements:
+                                if info.filename == 'manifest.json' and updated_manifest is not None:
+                                    target.write(updated_manifest)
+                                    item.update(size=len(updated_manifest), sha256=hashlib.sha256(updated_manifest).hexdigest(), manifest_updated=True)
+                                elif info.filename not in replacements:
                                     item['sha256'] = stream_entry(source, info, target)
                                 else:
                                     digest = hashlib.sha256(); size = 0
@@ -184,6 +220,8 @@ def repack(path, destination, replacements, max_entry, max_total):
                                             if size > new_info.file_size: raise ValueError('Replacement size changed during repack')
                                             digest.update(chunk); target.write(chunk)
                                     if size != new_info.file_size: raise ValueError('Replacement size changed during repack')
+                                    if update_manifest and (size, digest.hexdigest()) != replacement_hashes[info.filename]:
+                                        raise ValueError('Replacement changed during manifest update')
                                     item.update(size=size, sha256=digest.hexdigest(), replaced=True)
                 return items
             except BaseException as original:
@@ -229,7 +267,7 @@ def obb_layout(path, infos):
     return mapping
 
 
-def repack_directory(path, destination, replacements, max_entry, max_total):
+def repack_directory(path, destination, replacements, max_entry, max_total, *, update_manifest=False):
     """Create a directory with new archive and strictly manifest-validated OBB layout."""
     with zipfile.ZipFile(path) as z:
         infos = validate(z, max_entry, max_total)
@@ -237,7 +275,7 @@ def repack_directory(path, destination, replacements, max_entry, max_total):
     dest = Path(destination)
     dest.mkdir(exist_ok=False)
     try:
-        items = repack(path, dest/'repacked.xapk', replacements, max_entry, max_total)
+        items = repack(path, dest/'repacked.xapk', replacements, max_entry, max_total, update_manifest=update_manifest)
         with zipfile.ZipFile(path) as z:
             infos = validate(z, max_entry, max_total)
             by_name = {i.filename: i for i in infos}
