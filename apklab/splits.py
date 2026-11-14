@@ -1,9 +1,11 @@
 """Copy-based split set workspaces; operations are deliberately non-destructive."""
 import hashlib
 import json
+import os
 import re
 import shutil
 from pathlib import Path
+from .publish import publish_new, staging
 
 MAX_APKS = 1000
 
@@ -22,21 +24,21 @@ def init_set(destination, paths):
     if any(not p.is_file() or p.suffix.lower() != '.apk' for p in inputs):
         raise ValueError('All inputs must be APK files')
     root = Path(destination)
-    root.mkdir(exist_ok=False)
-    try:
+    if os.path.lexists(root): raise FileExistsError('Workspace already exists: ' + str(root))
+    with staging(root) as staged:
+        staged.mkdir()
         members = []
         for i, source in enumerate(inputs):
             name = 'apk-' + str(i).zfill(4)
-            folder = root / name; folder.mkdir()
+            folder = staged / name; folder.mkdir()
             dest = folder / 'original.apk'
             shutil.copyfile(source, dest)
             members.append({'id': name, 'source_name': source.name, 'sha256': sha256(dest)})
-        with (root / 'split-set.json').open('x', encoding='utf-8') as f:
+        with (staged / 'split-set.json').open('x', encoding='utf-8') as f:
             json.dump({'schema': 1, 'members': members}, f, indent=2)
+        publish_new(staged, root, directory=True)
         return members
-    except BaseException:
-        shutil.rmtree(root)
-        raise
+
 
 
 def read_set(destination):

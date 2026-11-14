@@ -1,9 +1,15 @@
 """Core helpers. APKs and their contents are untrusted input."""
 import json
+import contextlib
+import functools
+import zlib
 import os
 import re
 import shutil
 import subprocess
+import threading
+import time
+import signal
 import zipfile
 from pathlib import Path
 
@@ -18,56 +24,199 @@ TOOLS = {
 }
 
 
+def _windows():
+    return os.name == 'nt'
+
+
+def _build_tools_version(path):
+    """Sort Android SDK versions numerically, with a final release after its previews."""
+    name = path.name
+    match = re.fullmatch(r'(\d+(?:\.\d+)*)(?:[-_](.+))?', name)
+    if not match: return (0, (), 0, (), name.lower())
+    numbers = tuple(int(n) for n in match.group(1).split('.'))
+    numbers += (0,) * max(0, 4 - len(numbers))
+    preview = match.group(2)
+    # Tags are compared as alternating text/numeric chunks (rc10 follows rc2).
+    chunks = tuple((1, int(part)) if part.isdigit() else (0, part.lower())
+                   for part in re.findall(r'\d+|\D+', preview or ''))
+    return (1, numbers, 1 if preview is None else 0, chunks, name.lower())
+
+
+def _executable_names(item):
+    if not _windows(): return [item]
+    if os.path.splitext(item)[1]: return [item]
+    return [item + ext for ext in ('.exe', '.bat', '.cmd')] + [item]
+
+
 def find_tool(name):
     names = TOOLS[name]
+    # Explicit PATH choices take precedence over SDK fallback.
     for item in names:
         path = shutil.which(item)
         if path:
             return path
-    roots = [os.environ.get("ANDROID_SDK_ROOT"), os.environ.get("ANDROID_HOME"), str(Path.home() / "Android/Sdk")]
+    roots = [os.environ.get("ANDROID_SDK_ROOT"), os.environ.get("ANDROID_HOME")]
+    if _windows() and os.environ.get('LOCALAPPDATA'):
+        roots.append(str(Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk'))
+    roots.append(str(Path.home() / "Android/Sdk"))
     for root in filter(None, roots):
         root = Path(root)
         candidates = [root / "platform-tools", root / "emulator", root / "cmdline-tools/latest/bin"]
         build = root / "build-tools"
         if build.is_dir():
-            candidates.extend(sorted((p for p in build.iterdir() if p.is_dir()), reverse=True))
+            candidates.extend(sorted((p for p in build.iterdir() if p.is_dir()), key=_build_tools_version, reverse=True))
         for folder in candidates:
             for item in names:
-                path = folder / item
-                if path.is_file() and os.access(path, os.X_OK):
-                    return str(path)
+                for executable in _executable_names(item):
+                    path = folder / executable
+                    if path.is_file() and os.access(path, os.X_OK):
+                        return str(path)
     ghidra = os.environ.get("GHIDRA_HOME")
     if name == "ghidra" and ghidra:
-        path = Path(ghidra) / "ghidraRun"
-        if path.is_file() and os.access(path, os.X_OK):
-            return str(path)
+        for executable in _executable_names('ghidraRun'):
+            path = Path(ghidra) / executable
+            if path.is_file() and os.access(path, os.X_OK):
+                return str(path)
     return None
 
 
-def run(args, timeout=120):
+def _validate_windows_batch_args(args):
+    """Fail closed for batch arguments that cmd.exe can interpret as syntax."""
+    if args and os.path.splitext(str(args[0]))[1].lower() in ('.bat', '.cmd'):
+        if any(any(ch in '&|<>()^%!"' or ord(ch) < 32 for ch in str(value)) for value in args):
+            raise OSError('Unsafe Windows batch argument; shell metacharacters are not supported')
+
+
+def run(args, timeout=120, monitor=None):
+    """Run a process with bounded capture and best-effort process-tree cleanup.
+
+    monitor, when supplied, is called during execution and after termination;
+    it may raise to abort the process. This is not a sandbox or a disk quota.
+    """
+    limits = {'stdout': 200000, 'stderr': 20000}
+    buffers = {name: bytearray() for name in limits}
+    truncated = {name: False for name in limits}
+    process = None
+    job = None
+    threads = []
+    timed_out = False
+    error = None
     try:
-        result = subprocess.run([str(a) for a in args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, errors="replace", timeout=timeout, check=False)
-        return {"returncode": result.returncode, "stdout": result.stdout[:200000], "stderr": result.stderr[:20000]}
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return {"returncode": None, "stdout": "", "stderr": str(e)}
+        options = {}
+        if os.name == 'nt':
+            _validate_windows_batch_args(args)
+            from .winjob import WindowsJob
+            job = WindowsJob()
+            options['creationflags'] = 0x00000004  # CREATE_SUSPENDED
+        else:
+            options['start_new_session'] = True
+        process = subprocess.Popen([str(a) for a in args], stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
+        if job is not None:
+            try: job.attach_and_resume(process)
+            except BaseException:
+                process.kill(); process.wait()
+                raise
+        def drain(name, stream):
+            try:
+                while True:
+                    chunk = stream.read(8192)
+                    if not chunk: break
+                    room = max(0, limits[name] - len(buffers[name]))
+                    buffers[name].extend(chunk[:room])
+                    if len(chunk) > room: truncated[name] = True
+            finally:
+                stream.close()
+        threads = [threading.Thread(target=drain, args=(name, getattr(process, name)), daemon=True) for name in limits]
+        for thread in threads: thread.start()
+        deadline = time.monotonic() + timeout
+        while True:
+            if monitor: monitor()
+            if process.poll() is not None: break
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
+            time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+    except OSError as exc:
+        error = str(exc)
+    finally:
+        if process is not None:
+            if job is not None:
+                job.close(); job = None
+                if process.poll() is None:
+                    process.kill()
+            else:
+                # The group can outlive its leader, so signal it even after leader exit.
+                try: os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+            process.wait()
+            if not threads:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None: stream.close()
+        if job is not None: job.close()
+        for thread in threads: thread.join(timeout=1)
+    if monitor and not timed_out and error is None:
+        monitor()  # Include output written just before descendants terminated.
+    incomplete = any(thread.is_alive() for thread in threads)
+    result = {name: bytes(buffers[name]).decode('utf-8', 'replace') for name in limits}
+    result.update(returncode=None if timed_out or error or incomplete else process.returncode,
+                  stdout_truncated=truncated['stdout'], stderr_truncated=truncated['stderr'],
+                  capture_incomplete=incomplete)
+    if timed_out: error = 'Process timed out after ' + str(timeout) + ' seconds'
+    if incomplete: error = (error + '; ' if error else '') + 'Output streams did not close after process cleanup'
+    if error: result['stderr'] += ('\n' if result['stderr'] else '') + error
+    return result
 
 
 def report():
     return {"verified": [], "inferences": [], "failures": [], "not_tested": []}
 
 
+class PartialReportError(Exception):
+    """An operation failed after collecting report entries."""
+    def __init__(self, partial_report, original):
+        super().__init__(str(original))
+        self.report = partial_report
+        self.original = original
+
+
+@contextlib.contextmanager
+def preserve_report(partial_report):
+    try:
+        yield
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError, EOFError, zlib.error) as exc:
+        raise PartialReportError(partial_report, exc) from exc
+
+
+def reported(func):
+    """Preserve report entries when a command fails after recording progress."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        partial = report()
+        with preserve_report(partial):
+            return func(*args, _report=partial, **kwargs)
+    return wrapper
+
+
 def add(r, category, subject, detail):
     r[category].append({"subject": subject, "detail": detail})
 
 
-def emit(r, output=None):
-    text = json.dumps(r, indent=2, ensure_ascii=False)
+def emit(r, output=None, summary=False):
+    # Escape isolated UTF-16 surrogates that valid DEX MUTF-8 can contain.
+    text = json.dumps(r, indent=2, ensure_ascii=False).encode('utf-8', 'backslashreplace').decode('utf-8')
     if output:
         p = Path(output)
         # Reports must not clobber an existing file, including an input APK.
         with p.open("x", encoding="utf-8") as f:
             f.write(text + "\n")
+    if summary:
+        print('Summary: {} reported checks ran ({} verified, {} failed); {} not tested; {} inferences.'.format(
+            len(r['verified']) + len(r['failures']), len(r['verified']), len(r['failures']),
+            len(r['not_tested']), len(r['inferences'])))
+        for item in r['not_tested']:
+            print('  Not tested: {} - {}'.format(item['subject'], item['detail']))
+        print('JSON report:')
     print(text)
 
 
@@ -82,6 +231,33 @@ def zip_infos(z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     return infos
 
 
+def check_zip_crc(z, infos):
+    """Read each central-directory entry by identity, including duplicate names."""
+    for info in infos:
+        if info.is_dir():
+            continue
+        try:
+            with z.open(info) as entry:
+                while entry.read(1024 * 1024):
+                    pass
+        except zipfile.BadZipFile:
+            return info.filename
+    return None
+
+
+def validate_apk_archive(path, z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
+    """Validate basic APK ZIP structure and CRCs, not signatures or manifest contents."""
+    if Path(path).suffix.lower() == '.xapk':
+        raise ValueError('XAPK is an archive, not an APK; use apklab xapk inspect or unpack')
+    infos = zip_infos(z, max_entry, max_total)
+    manifests = [info for info in infos if info.filename == 'AndroidManifest.xml' and not info.is_dir()]
+    if len(manifests) != 1:
+        raise ValueError('APK must contain exactly one AndroidManifest.xml')
+    bad = check_zip_crc(z, infos)
+    if bad: raise ValueError('ZIP CRC failure: ' + bad)
+    return infos
+
+
 def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     path = Path(path)
     item = {"file": str(path), "package": None, "version_name": None, "version_code": None, "architectures": [], "signer_sha256": None}
@@ -90,17 +266,11 @@ def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
         return item
     try:
         with zipfile.ZipFile(path) as z:
-            infos = zip_infos(z, max_entry, max_total)
-            bad = z.testzip()
-            if bad:
-                add(r, "failures", str(path), "ZIP CRC failure: " + bad)
-            else:
-                add(r, "verified", str(path), "ZIP entries passed CRC checks")
+            infos = validate_apk_archive(path, z, max_entry, max_total)
+            add(r, "verified", str(path), "ZIP entries passed CRC checks")
             names = [i.filename for i in infos]
             item["architectures"] = sorted({n.split('/')[1] for n in names if n.startswith('lib/') and len(n.split('/')) >= 3})
             item["entries"] = len(names)
-            if "AndroidManifest.xml" not in names:
-                add(r, "failures", str(path), "AndroidManifest.xml missing; not a standard APK")
     except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, NotImplementedError) as e:
         add(r, "failures", str(path), "ZIP inspection: " + str(e))
         return item
@@ -108,11 +278,15 @@ def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     if tool:
         result = run([tool, "dump", "badging", path])
         if result["returncode"] == 0:
-            line = next((line for line in result["stdout"].splitlines() if line.startswith('package:')), '')
-            attrs = dict(re.findall(r"([\w]+)='([^']*)'", line))
+            lines = result["stdout"].splitlines(keepends=True)
+            line = next((line for line in lines if line.startswith('package:')), '')
+            incomplete = bool(result.get('stdout_truncated') and line and not line.endswith(('\n', '\r')))
+            attrs = dict(re.findall(r"([\w]+)='([^']*)'", line)) if not incomplete else {}
             if attrs.get('name') and attrs.get('versionCode'):
                 item.update(package=attrs['name'], version_code=attrs['versionCode'], version_name=attrs.get('versionName'), split=attrs.get('split'))
                 add(r, "verified", str(path), "Package and version code read with aapt")
+            elif result.get('stdout_truncated'):
+                add(r, "not_tested", str(path), "aapt package metadata unavailable in truncated output")
             else:
                 add(r, "failures", str(path), "aapt returned no parseable package metadata")
         else:
@@ -123,12 +297,18 @@ def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     if signer:
         result = run([signer, "verify", "--verbose", "--print-certs", path])
         if result["returncode"] == 0:
-            digests = re.findall(r'^Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F:]+)\s*$', result['stdout'], re.MULTILINE)
-            if digests and all(len(d.replace(':', '')) == 64 for d in digests):
+            matches = re.findall(r'^Signer #(\d+) certificate SHA-256 digest:\s*([0-9a-fA-F:]+)\s*$', result['stdout'], re.MULTILINE)
+            declared = re.search(r'^Number of signers:\s*(\d+)\s*$', result['stdout'], re.MULTILINE)
+            numbers = [int(number) for number, _ in matches]
+            digests = [digest for _, digest in matches]
+            if (digests and not result.get('stdout_truncated') and not result.get('capture_incomplete')
+                    and sorted(numbers) == list(range(1, len(numbers) + 1))
+                    and (not declared or int(declared.group(1)) == len(numbers))
+                    and all(len(d.replace(':', '')) == 64 for d in digests)):
                 item['signer_sha256'] = sorted({d.replace(':', '').lower() for d in digests})
             add(r, "verified", str(path), "apksigner verification passed: " + result["stdout"][:4000])
             if item['signer_sha256'] is None:
-                add(r, "not_tested", str(path), "Signer certificate digest could not be parsed")
+                add(r, "not_tested", str(path), "Signer certificate digest could not be parsed completely")
         else:
             add(r, "failures", str(path), "apksigner verification failed: " + (result["stderr"] or result["stdout"])[:2000])
     else:

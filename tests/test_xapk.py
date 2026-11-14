@@ -33,14 +33,14 @@ class XapkTests(unittest.TestCase):
             for name, data in entries: z.writestr(name, data)
     def test_inspect_unverified_and_verify(self):
         code, r = self.call('xapk', 'inspect', str(self.source))
-        self.assertEqual(code, 0); self.assertEqual([e['kind'] for e in r['entries']], ['apk', 'apk', 'obb', 'other'])
+        self.assertEqual(code, 3); self.assertEqual([e['kind'] for e in r['entries']], ['apk', 'apk', 'obb', 'other'])
         self.assertTrue(any(x['subject'] == 'XAPK CRC' for x in r['not_tested']))
         code, r = self.call('xapk', 'inspect', str(self.source), '--verify')
-        self.assertEqual(code, 0); self.assertEqual(r['entries'][0]['sha256'], hashlib.sha256(self.apk.read_bytes()).hexdigest())
+        self.assertEqual(code, 3); self.assertEqual(r['entries'][0]['sha256'], hashlib.sha256(self.apk.read_bytes()).hexdigest())
     def test_unpack_original_untouched_and_no_overwrite(self):
         digest = hashlib.sha256(self.source.read_bytes()).digest(); dest = self.root/'output'
         code, r = self.call('xapk', 'unpack', str(self.source), str(dest))
-        self.assertEqual(code, 0, r); self.assertEqual((dest/'base.apk').read_bytes(), self.apk.read_bytes())
+        self.assertEqual(code, 3, r); self.assertEqual((dest/'base.apk').read_bytes(), self.apk.read_bytes())
         self.assertEqual((dest/'Android/obb/org.example/main.1.org.example.obb').read_bytes(), b'asset-data')
         self.assertEqual(digest, hashlib.sha256(self.source.read_bytes()).digest())
         code, _ = self.call('xapk', 'unpack', str(self.source), str(dest)); self.assertEqual(code, 1)
@@ -68,7 +68,7 @@ class XapkTests(unittest.TestCase):
         self.write_archive([('base.apk', b'x'*(1024*1024+1))])
         code, _ = self.call('xapk', 'inspect', str(self.source), '--max-entry-mib', '1'); self.assertEqual(code, 1)
         code, _ = self.call('xapk', 'inspect', str(self.source), '--max-total-mib', '1'); self.assertEqual(code, 1)
-        code, _ = self.call('xapk', 'inspect', str(self.source), '--max-total-mib', '2'); self.assertEqual(code, 0)
+        code, _ = self.call('xapk', 'inspect', str(self.source), '--max-total-mib', '2'); self.assertEqual(code, 3)
         code, _ = self.call('inspect', str(self.apk), '--max-total-mib', '0'); self.assertEqual(code, 1)
     def test_corrupt_cleanup(self):
         self.write_archive([('base.apk', b'special-value'), ('a.obb', b'other')])
@@ -82,7 +82,7 @@ class XapkTests(unittest.TestCase):
         self.assertEqual(code, 1); self.assertEqual(r['manifest']['missing_apks'], ['missing.apk'])
         self.write_archive([('base.apk', b'fake'), ('manifest.json', json.dumps({'split_apks': [{'file': 'base.apk'}]}))])
         code, r = self.call('xapk', 'inspect', str(self.source))
-        self.assertEqual(code, 0); self.assertEqual(r['manifest']['missing_apks'], [])
+        self.assertEqual(code, 3); self.assertEqual(r['manifest']['missing_apks'], [])
         self.assertEqual(r['manifest']['status'], 'parsed')
         self.write_archive([('base.apk', b'fake'), ('manifest.json', '{bad json')])
         code, r = self.call('xapk', 'inspect', str(self.source))
@@ -94,12 +94,12 @@ class XapkTests(unittest.TestCase):
         self.assertFalse((self.root/'out').exists())
     def test_recursive_apk_inspection(self):
         dest = self.root/'out'
-        code, _ = self.call('xapk', 'unpack', str(self.source), str(dest)); self.assertEqual(code, 0)
+        code, _ = self.call('xapk', 'unpack', str(self.source), str(dest)); self.assertEqual(code, 3)
         with patch('apklab.core.find_tool', return_value=None):
             code, top = self.call('inspect', str(dest))
-            self.assertEqual(code, 0); self.assertEqual(len(top['apks']), 1)
+            self.assertEqual(code, 3); self.assertEqual(len(top['apks']), 1)
             code, all_apks = self.call('inspect', str(dest), '--recursive')
-            self.assertEqual(code, 0); self.assertEqual(len(all_apks['apks']), 2)
+            self.assertEqual(code, 3); self.assertEqual(len(all_apks['apks']), 2)
             self.assertTrue(any('not verified' in e['detail'] for e in all_apks['not_tested']))
     def test_xapk_is_not_apk(self):
         code, r = self.call('inspect', str(self.source))
@@ -128,6 +128,6 @@ class XapkTests(unittest.TestCase):
         self.assertEqual(code, 1); self.assertTrue(any('signer certificate' in x['detail'] for x in r['failures']))
         with patch('apklab.core.find_tool', return_value=None):
             code, r = self.call('inspect', str(self.apk), str(another))
-        self.assertEqual(code, 0); self.assertTrue(any('Cannot compare signer' in x['detail'] for x in r['not_tested']))
+        self.assertEqual(code, 3); self.assertTrue(any('Cannot compare signer' in x['detail'] for x in r['not_tested']))
 
 if __name__ == '__main__': unittest.main()

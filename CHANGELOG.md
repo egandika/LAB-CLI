@@ -1,0 +1,17 @@
+# Changelog
+
+## 0.5.0 (unreleased)
+
+- Check duplicate ZIP entries individually, bound subprocess output, and make process cleanup best effort across POSIX and Windows.
+- Limit DEX index expansion, decode Modified UTF-8, and report unsupported or malformed inputs rather than silently replacing invalid text.
+- Validate APK ZIP structure consistently, report partial manifest output, and stage workspace and XAPK outputs before publication.
+- Preserve partial reports, document page-size verification behavior, and include bounded JADX diagnostics.
+- Compare verified split-output signer digests and selected explicit manifest dependencies; report missing metadata as untested.
+- Improve SDK tool discovery, ZIP ignore patterns, and synthetic regression coverage.
+- Pin GitHub Actions to full commit hashes; runtime downloads remain separate dependencies.
+
+These checks do not prove APK installability, ELF segment alignment, split completeness, or runtime behavior. Process cleanup is not a sandbox. The Android-tool and split integration paths require independent real-tool testing.
+
+## 0.4.0
+
+- Added copy-based APK and split workflows, XAPK inspection and extraction, opt-in emulator tests, and JSON evidence reports.

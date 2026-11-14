@@ -13,3 +13,9 @@ dist/
 *.jks
 *.keystore
 apklab-work*/
+# Default analysis output directories; prefer storing sensitive data outside the checkout.
+jadx-output/
+split-work/
+xapk-copy/
+new-output/
+apklab-report*.json

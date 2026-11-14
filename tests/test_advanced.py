@@ -36,27 +36,28 @@ class AdvancedTests(unittest.TestCase):
             return {'returncode': 0, 'stdout': '', 'stderr': ''}
         with patch('apklab.workflow.find_tool', return_value='/tool/zipalign'), patch('apklab.workflow.run', side_effect=fake_run):
             code, r = self.call('work', 'align', str(self.work), '--page-size', '16')
-        self.assertEqual(code, 0, r); self.assertTrue(any('-P' in c and '16' in c for c in calls))
+        self.assertEqual(code, 3, r); self.assertTrue(any('-P' in c and '16' in c for c in calls))
         with patch('apklab.cli.find_tool', return_value='/tool'), patch('apklab.cli.supports_16k', return_value=True), patch('apklab.cli.run', side_effect=fake_run):
             code, r = self.call('work', 'verify', str(self.work), '--page-size', '16')
-        self.assertEqual(code, 0, r); self.assertTrue(any('-c' in c and '-P' in c for c in calls))
+        self.assertEqual(code, 3, r); self.assertTrue(any('-c' in c and '-P' in c for c in calls))
         self.assertTrue(any('ELF' in x['detail'] for x in r['not_tested']))
 
     def test_unsupported_16k_is_not_verified(self):
         with patch('apklab.cli.find_tool', return_value='/tool'), patch('apklab.cli.supports_16k', return_value=False), patch('apklab.cli.run', return_value={'returncode': 0, 'stdout':'', 'stderr':''}):
             code, r = self.call('work', 'verify', str(self.work), '--page-size', '16')
-        self.assertEqual(code, 0); self.assertTrue(any(x['subject']=='zipalign' for x in r['not_tested']))
+        self.assertEqual(code, 3); self.assertTrue(any(x['subject']=='zipalign_16k' for x in r['not_tested']))
         with patch('apklab.workflow.find_tool', return_value='/tool'), patch('apklab.workflow.supports_16k', return_value=False):
             code, r = self.call('work', 'align', str(self.work), '--page-size', '16')
         self.assertEqual(code, 1); self.assertFalse((self.work/'aligned.apk').exists())
 
     def test_jadx_uses_copy_and_refuses_overwrite(self):
-        def fake_run(args, timeout=600):
+        def fake_run(args, timeout=600, monitor=None):
             self.assertEqual(Path(args[-1]).resolve(), (self.work/'original.apk').resolve())
             self.assertIn('--no-res', args); Path(args[args.index('-d')+1]).mkdir()
+            self.assertIsNotNone(monitor); monitor()
             return {'returncode':0,'stdout':'','stderr':''}
         with patch('apklab.workflow.find_tool', return_value='/tool/jadx'), patch('apklab.workflow.run', side_effect=fake_run):
-            code, r = self.call('work','jadx',str(self.work)); self.assertEqual(code, 0, r)
+            code, r = self.call('work','jadx',str(self.work)); self.assertEqual(code, 3, r)
             code, r = self.call('work','jadx',str(self.work)); self.assertEqual(code, 1, r)
 
     def test_split_candidates_and_abi_are_limited_observations(self):
@@ -67,7 +68,7 @@ class AdvancedTests(unittest.TestCase):
             return {'returncode':0,'stdout':data,'stderr':''}
         with patch('apklab.core.find_tool', side_effect=lambda x: '/aapt' if x == 'aapt' else None), patch('apklab.core.run', side_effect=fake_run):
             code, r = self.call('inspect',str(self.apk),str(split),'--device-abi','arm64-v8a')
-        self.assertEqual(code, 0, r); self.assertEqual(r['split_candidates']['base'], [str(self.apk)])
+        self.assertEqual(code, 3, r); self.assertEqual(r['split_candidates']['base'], [str(self.apk)])
         self.assertTrue(any(x['subject']=='device compatibility' for x in r['not_tested']))
 
     def test_repack_preserves_source_and_obb(self):
@@ -77,7 +78,7 @@ class AdvancedTests(unittest.TestCase):
             z.write(self.apk, 'base.apk'); z.writestr('Android/obb/test.obb', b'obb'); z.writestr('manifest.json', '{}')
         before = hashlib.sha256(archive.read_bytes()).hexdigest()
         code, r = self.call('xapk','repack',str(archive),str(output),'--replace','base.apk='+str(replacement))
-        self.assertEqual(code, 0, r); self.assertTrue(any(x['subject']=='repacked XAPK' for x in r['not_tested']))
+        self.assertEqual(code, 3, r); self.assertTrue(any(x['subject']=='repacked XAPK' for x in r['not_tested']))
         with zipfile.ZipFile(output) as z:
             self.assertEqual(z.read('base.apk'), replacement.read_bytes()); self.assertEqual(z.read('Android/obb/test.obb'), b'obb')
         self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), before)
@@ -99,7 +100,7 @@ class AdvancedTests(unittest.TestCase):
             z.writestr('assets/settings.txt', 'alpha\nServer=example.org\n')
             z.writestr('assets/data.bin', b'\x00server')
         code, r = self.call('inventory',str(self.apk),'--text','server')
-        self.assertEqual(code, 0, r)
+        self.assertEqual(code, 3, r)
         self.assertEqual(r['content_matches'][0]['line'], 2)
         self.assertEqual(r['content_matches'][0]['path'], 'assets/settings.txt')
         self.assertTrue(any(x['subject']=='asset text search' for x in r['not_tested']))
@@ -119,7 +120,7 @@ class AdvancedTests(unittest.TestCase):
             return {'returncode':0,'stdout':'symbol-table','stderr':''}
         with patch('apklab.cli.find_tool', return_value='/tool/readelf'), patch('apklab.cli.run', side_effect=fake_run):
             code, r = self.call('inventory',str(self.apk),'--native-symbols')
-        self.assertEqual(code,0,r); self.assertEqual(r['files'][0]['symbols'],'symbol-table')
+        self.assertEqual(code, 3,r); self.assertEqual(r['files'][0]['symbols'],'symbol-table')
         self.assertTrue(r['not_tested'])
 
 if __name__ == '__main__': unittest.main()
