@@ -45,8 +45,65 @@ jobs:
             https://raw.githubusercontent.com/androguard/androguard/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk \
             --output "$RUNNER_TEMP/apklab-test.apk"
           echo '3bb32dd50129690bce850124ea120aa334e708eaa7987cf2329fd1ea0467a0eb  '"$RUNNER_TEMP/apklab-test.apk" | sha256sum -c -
+      - name: Prepare 16 KiB-capable Android build tools
+        run: |
+          if [ ! -x "$ANDROID_HOME/build-tools/35.0.0/zipalign" ]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;35.0.0'
+          fi
+          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+      - name: Install checksum-verified JADX
+        run: |
+          curl --fail --location --silent --show-error --retry 3 \
+            https://github.com/skylot/jadx/releases/download/v1.5.6/jadx-1.5.6.zip \
+            --output "$RUNNER_TEMP/jadx.zip"
+          echo '545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974  '"$RUNNER_TEMP/jadx.zip" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/jadx"
+          unzip -q "$RUNNER_TEMP/jadx.zip" -d "$RUNNER_TEMP/jadx"
+          chmod +x "$RUNNER_TEMP/jadx/bin/jadx"
+          echo "$RUNNER_TEMP/jadx/bin" >> "$GITHUB_PATH"
       - run: python -m pip install .
       - name: Run real-tool integration test
         env:
           APKLAB_INTEGRATION_APK: ${{ runner.temp }}/apklab-test.apk
+          APKLAB_TEST_16K: '1'
+          APKLAB_TEST_JADX: '1'
+          APKLAB_TEST_SPLITS: '1'
         run: python -m unittest discover -s tests -p test_integration.py -v
+
+  emulator:
+    name: Disposable emulator integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Android tools from Ubuntu repositories
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-jdk-headless apktool aapt zipalign apksigner adb
+      - name: Download and verify public test fixture
+        run: |
+          curl --fail --location --silent --show-error \
+            https://raw.githubusercontent.com/androguard/androguard/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk \
+            --output "$RUNNER_TEMP/apklab-test.apk"
+          echo '3bb32dd50129690bce850124ea120aa334e708eaa7987cf2329fd1ea0467a0eb  '"$RUNNER_TEMP/apklab-test.apk" | sha256sum -c -
+      - run: python -m pip install .
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and launch test APK in disposable emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          APKLAB_INTEGRATION_APK: ${{ runner.temp }}/apklab-test.apk
+          APKLAB_EMULATOR_SERIAL: emulator-5554
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: python -m unittest discover -s tests -p test_integration.py -v

@@ -1,0 +1,63 @@
+"""Copy-based split set workspaces; operations are deliberately non-destructive."""
+import hashlib
+import json
+import re
+import shutil
+from pathlib import Path
+
+MAX_APKS = 1000
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''): digest.update(chunk)
+    return digest.hexdigest()
+
+
+def init_set(destination, paths):
+    inputs = [Path(p).resolve(strict=True) for p in paths]
+    if not inputs or len(inputs) > MAX_APKS: raise ValueError('Provide 1 to 1000 APK files')
+    if len(inputs) != len(set(inputs)): raise ValueError('Duplicate APK paths')
+    if any(not p.is_file() or p.suffix.lower() != '.apk' for p in inputs):
+        raise ValueError('All inputs must be APK files')
+    root = Path(destination)
+    root.mkdir(exist_ok=False)
+    try:
+        members = []
+        for i, source in enumerate(inputs):
+            name = 'apk-' + str(i).zfill(4)
+            folder = root / name; folder.mkdir()
+            dest = folder / 'original.apk'
+            shutil.copyfile(source, dest)
+            members.append({'id': name, 'source_name': source.name, 'sha256': sha256(dest)})
+        with (root / 'split-set.json').open('x', encoding='utf-8') as f:
+            json.dump({'schema': 1, 'members': members}, f, indent=2)
+        return members
+    except BaseException:
+        shutil.rmtree(root)
+        raise
+
+
+def read_set(destination):
+    root = Path(destination).resolve(strict=True)
+    metadata = root / 'split-set.json'
+    if not metadata.is_file() or metadata.stat().st_size > 1024 * 1024:
+        raise ValueError('Missing or oversized split-set.json')
+    data = json.loads(metadata.read_text(encoding='utf-8'))
+    if not isinstance(data, dict) or data.get('schema') != 1 or not isinstance(data.get('members'), list) or not 1 <= len(data['members']) <= MAX_APKS:
+        raise ValueError('Invalid split-set metadata')
+    ids = set()
+    for item in data['members']:
+        if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not re.fullmatch(r'apk-[0-9]{4}', item['id']):
+            raise ValueError('Invalid split member ID')
+        ident = item['id']
+        if ident in ids: raise ValueError('Duplicate split member ID')
+        ids.add(ident)
+        folder = (root / ident).resolve(strict=True)
+        original = (folder / 'original.apk').resolve(strict=True)
+        if not folder.is_relative_to(root) or not original.is_relative_to(folder) or not original.is_file():
+            raise ValueError('Split member must remain inside the set workspace')
+        if not isinstance(item.get('sha256'), str) or sha256(original) != item['sha256']:
+            raise ValueError('Workspace original copy changed: ' + ident)
+    return root, data['members']

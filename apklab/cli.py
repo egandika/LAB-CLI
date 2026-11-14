@@ -8,8 +8,10 @@ from pathlib import Path
 from . import __version__
 from .core import TOOLS, add, emit, find_tool, inspect_one, report, run, zip_infos
 from .dex import read_dex
-from .workflow import init, perform, workspace_input
-from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, manifest_info
+from .workflow import init, perform, workspace_input, supports_16k
+from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, repack as repack_xapk, manifest_info
+from .device import install_test
+from .splits import init_set, read_set
 
 
 VERSION_ARGS = {
@@ -115,11 +117,25 @@ def inspect(args):
             else:
                 add(r, 'not_tested', 'split set', 'Cannot compare ' + label + ' for every APK')
         split_names = [a.get('split') for a in r['apks'] if a.get('split')]
+        if all(a.get('package') for a in r['apks']):
+            bases = [a['file'] for a in r['apks'] if a.get('split') is None]
+            r['split_candidates'] = {'base': bases, 'named_splits': {a['file']: a['split'] for a in r['apks'] if a.get('split')}}
+            add(r, 'inferences', 'base candidates', str(len(bases)) + ' APK(s) have no split name in aapt output; base identity and completeness require independent validation')
         if len(split_names) != len(set(split_names)):
             add(r, 'failures', 'split set', 'Duplicate non-empty split names found in aapt metadata')
         if not all(a.get('package') for a in r['apks']):
             add(r, 'not_tested', 'split names', 'Metadata unavailable for one or more APKs')
         add(r, 'not_tested', 'split set', 'Completeness, split dependencies, signer rotation compatibility and installation not verified')
+    if args.device_abi:
+        present = sorted({abi for apk in r['apks'] for abi in apk['architectures']})
+        r['abi_observation'] = {'requested': args.device_abi, 'native_directories': present}
+        if args.device_abi in present:
+            add(r, 'verified', 'ABI directories', 'Requested ABI appears in at least one inspected APK')
+        elif present:
+            add(r, 'inferences', 'ABI directories', 'Requested ABI not observed; this alone does not prove incompatibility')
+        else:
+            add(r, 'not_tested', 'ABI directories', 'No native library directories observed')
+        add(r, 'not_tested', 'device compatibility', 'ABI directory names do not verify native code or device compatibility')
     return r
 
 
@@ -134,14 +150,26 @@ def xapk(args):
             add(r, 'verified', 'XAPK', 'All file entries decompressed and CRC-checked; SHA-256 hashes recorded')
         else:
             add(r, 'not_tested', 'XAPK CRC', 'Use --verify to read and CRC-check all file entries')
-    else:
+    elif args.action == 'unpack':
         entries = unpack_xapk(args.archive, args.destination, entry, total)
         r['entries'] = entries
         add(r, 'verified', 'XAPK', 'Entries copied to a new directory with CRC checks and SHA-256 hashes')
         r['destination'] = str(Path(args.destination).resolve())
+    else:
+        replacements = {}
+        for value in args.replace:
+            name, sep, replacement = value.partition('=')
+            if not sep or not name or not replacement or name in replacements:
+                raise ValueError('Each --replace must be a unique ENTRY=FILE pair')
+            replacements[name] = replacement
+        entries = repack_xapk(args.archive, args.destination, replacements, entry, total)
+        r['entries'] = entries
+        r['destination'] = str(Path(args.destination).resolve())
+        add(r, 'verified', 'XAPK', 'Copied validated ZIP entries to a new archive; replacement APK ZIP CRCs were checked')
+        add(r, 'not_tested', 'repacked XAPK', 'Signatures, manifest sizes, OBB compatibility, installer support and runtime behavior were not verified')
     if not any(i['kind'] == 'apk' for i in entries):
         add(r, 'failures', 'XAPK', 'No APK entries found')
-    manifest = manifest_info(args.archive, entries)
+    manifest = manifest_info(args.destination if args.action == 'repack' else args.archive, entries)
     r['manifest'] = manifest
     if manifest['status'] == 'parsed':
         add(r, 'verified', 'XAPK manifest', 'Compared split_apks file references against archive entry names')
@@ -171,7 +199,28 @@ def inventory(args):
                 matches.append(info)
                 r['files'].append({'path': n, 'size': info.file_size, 'category': category})
         add(r, 'verified', 'inventory', 'Indexed matching ZIP entry names and sizes; file contents not validated')
-        if args.native_details:
+        if args.text:
+            r['content_matches'] = []
+            skipped = 0; scanned = 0; total_read = 0
+            for info, item in zip(matches, r['files']):
+                if item['category'] != 'asset' or info.is_dir(): continue
+                if info.file_size > MIB or total_read + info.file_size > 32 * MIB:
+                    skipped += 1; continue
+                data = z.read(info); total_read += len(data)
+                if b'\x00' in data:
+                    skipped += 1; continue
+                try: text = data.decode('utf-8')
+                except UnicodeDecodeError:
+                    skipped += 1; continue
+                scanned += 1
+                for number, line in enumerate(text.splitlines(), 1):
+                    if args.text.casefold() in line.casefold():
+                        r['content_matches'].append({'path': info.filename, 'line': number, 'excerpt': line[:240]})
+                        if len(r['content_matches']) >= 200: break
+                if len(r['content_matches']) >= 200: break
+            add(r, 'verified', 'asset text search', 'Searched ' + str(scanned) + ' UTF-8 entries, capped at 200 results')
+            add(r, 'not_tested', 'asset text search', 'Binary, large, unsupported, and remaining entries may be skipped; ' + str(skipped) + ' explicitly skipped')
+        if args.native_details or args.native_symbols:
             import tempfile
             tool = find_tool('readelf')
             if not tool: add(r, 'not_tested', 'native details', 'readelf not found')
@@ -183,10 +232,13 @@ def inventory(args):
                         native = Path(tmp) / 'library.so'
                         with z.open(info) as source, native.open('xb') as output:
                             shutil.copyfileobj(source, output, length=1024 * 1024)
-                        res = run([tool, '-h', '-d', native])
-                    item['readelf'] = res['stdout'][:20000]
-                    if res['returncode'] != 0: add(r, 'failures', item['path'], 'readelf failed: ' + res['stderr'][:500])
-                    else: add(r, 'verified', item['path'], 'readelf header and dynamic section')
+                        for label, flags in ([('readelf', ['-h', '-d'])] if args.native_details else []) + ([('symbols', ['-W', '-s'])] if args.native_symbols else []):
+                            res = run([tool] + flags + [native])
+                            item[label] = res['stdout'][:20000]
+                            if res['returncode'] != 0: add(r, 'failures', item['path'], 'readelf ' + label + ' failed: ' + res['stderr'][:500])
+                            else: add(r, 'verified', item['path'], 'readelf ' + label + ' completed (output capped)')
+                if args.native_symbols:
+                    add(r, 'not_tested', 'native behavior', 'Symbol tables may be stripped; static symbols do not prove runtime behavior')
     return r
 
 
@@ -223,10 +275,14 @@ def work(args):
     elif args.stage == 'verify':
         src = workspace_input(args.workspace, args.input or 'signed.apk')
         r['checks'] = {}
-        for name, flags in [('zipalign', ['-c', '-p', '4']), ('apksigner', ['verify', '--verbose', '--print-certs'])]:
+        page_size = args.page_size
+        for name, flags in [('zipalign', ['-c'] + (['-P', '16'] if page_size == 16 else ['-p']) + ['4']), ('apksigner', ['verify', '--verbose', '--print-certs'])]:
             tool = find_tool(name)
             if not tool:
                 add(r, 'not_tested', name, 'Executable not found')
+                continue
+            if name == 'zipalign' and page_size == 16 and not supports_16k(tool):
+                add(r, 'not_tested', name, 'zipalign does not advertise -P 16 support')
                 continue
             result = run([tool] + flags + [src], timeout=120)
             r['checks'][name] = result
@@ -234,14 +290,55 @@ def work(args):
                 add(r, 'verified', name, 'Verification command succeeded for ' + str(src))
             else:
                 add(r, 'failures', name, 'Verification command failed: ' + (result['stderr'] or result['stdout'])[:2000])
-        add(r, 'not_tested', 'runtime', 'Installability, signature identity compatibility, and app behavior are not verified')
+        add(r, 'not_tested', 'runtime', 'Installability, ELF segment alignment, signature identity compatibility, and app behavior are not verified')
     else:
         dest, result = perform(args.stage, args.workspace, args.input, args.output_path,
-                               getattr(args, 'keystore', None), getattr(args, 'alias', None), getattr(args, 'pass_env', None))
+                               getattr(args, 'keystore', None), getattr(args, 'alias', None), getattr(args, 'pass_env', None),
+                               getattr(args, 'page_size', 4))
         add(r, 'verified', args.stage, 'Tool exited successfully and output exists: ' + dest)
         r['tool_output'] = result
         add(r, 'not_tested', 'output', 'Installability, runtime behavior, original signature compatibility and functionality are not verified')
         if args.stage == 'sign': add(r, 'not_tested', 'signature', 'Run inspect on signed output to verify its signature independently')
+    return r
+
+
+def device(args):
+    return install_test(args.serial, args.apks, args.confirm_install, args.launch)
+
+
+def splits(args):
+    r = report()
+    if args.action == 'init':
+        r['members'] = init_set(args.workspace, args.apks)
+        add(r, 'verified', 'split workspace', 'Copied APKs to new member workspaces and recorded SHA-256 digests')
+        add(r, 'not_tested', 'split set', 'Package, signature, base identity and completeness not checked; run inspect separately')
+        return r
+    root, members = read_set(args.workspace)
+    if args.stage == 'sign' and not (args.keystore and args.alias and args.pass_env):
+        raise ValueError('sign requires --keystore, --alias and --pass-env')
+    r['members'] = []
+    for item in members:
+        folder = root / item['id']
+        result = {'id': item['id'], 'source_name': item.get('source_name')}
+        try:
+            if args.stage == 'verify':
+                sub = work(argparse.Namespace(stage='verify', workspace=str(folder), input=None, page_size=args.page_size))
+                result['report'] = sub
+                if sub['failures']:
+                    add(r, 'failures', item['id'], 'Verification reported failure')
+                if sub['verified']:
+                    add(r, 'verified', item['id'], 'See individual report for successful checks')
+                if sub['not_tested']:
+                    add(r, 'not_tested', item['id'], 'See individual verification report for checks not performed')
+            else:
+                dest, output = perform(args.stage, str(folder), None, None, args.keystore, args.alias, args.pass_env, args.page_size)
+                result.update(output=dest, tool_output=output)
+                add(r, 'verified', item['id'], args.stage + ' tool returned success and output exists')
+        except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as e:
+            result['error'] = str(e)
+            add(r, 'failures', item['id'], str(e))
+        r['members'].append(result)
+    add(r, 'not_tested', 'split set', 'Operations may partially succeed; completeness, matching signer digests, installability and runtime behavior are not verified')
     return r
 
 
@@ -266,33 +363,54 @@ def parser():
     q = cmd('inspect', 'Inspect one APK or a split set (files or directories)', inspect)
     q.add_argument('apks', nargs='+')
     q.add_argument('--recursive', action='store_true', help='Include APKs in subdirectories of supplied directories')
+    q.add_argument('--device-abi', help='Compare a device ABI with observed native library directory names')
     zip_limits(q)
     q = cmd('xapk', 'Safely inspect or unpack XAPK archives', xapk)
     actions = q.add_subparsers(dest='action', required=True)
-    for action in ('inspect', 'unpack'):
+    for action in ('inspect', 'unpack', 'repack'):
         x = actions.add_parser(action, help=action + ' an XAPK archive')
         x.add_argument('archive')
         if action == 'unpack': x.add_argument('destination', help='New directory; parent must exist')
+        elif action == 'repack':
+            x.add_argument('destination', help='New output archive; parent must exist')
+            x.add_argument('--replace', action='append', default=[], metavar='ENTRY=APK', help='Replace an existing APK entry; repeat as needed')
         else: x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
         x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
     q = cmd('inventory', 'List asset and native library paths', inventory)
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive path substring')
+    q.add_argument('--text', help='Search UTF-8 asset contents (bounded and case-insensitive)')
     q.add_argument('--native-details', action='store_true', help='Run readelf for matching native libraries')
+    q.add_argument('--native-symbols', action='store_true', help='Index available native symbol tables with readelf')
     zip_limits(q)
     q = cmd('dex', 'Index DEX classes, methods, API references, strings, URLs, and possible models', dex)
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive substring filter')
     q.add_argument('--limit', type=int, default=200, help='Maximum entries per list (default 200)')
     zip_limits(q)
+    q = cmd('splits', 'Copy-based multi-APK split workflows', splits)
+    actions = q.add_subparsers(dest='action', required=True)
+    i = actions.add_parser('init', help='Copy APKs into a new split workspace')
+    i.add_argument('workspace'); i.add_argument('apks', nargs='+')
+    s = actions.add_parser('run', help='Run a stage for each APK copy')
+    s.add_argument('workspace'); s.add_argument('stage', choices=('decode', 'build', 'align', 'sign', 'verify'))
+    s.add_argument('--page-size', type=int, choices=(4, 16), default=4)
+    s.add_argument('--keystore'); s.add_argument('--alias'); s.add_argument('--pass-env')
+    q = cmd('device', 'Opt-in installation test on a disposable emulator', device)
+    q.add_argument('--serial', required=True, help='Explicit emulator-NNNN serial (physical devices refused)')
+    q.add_argument('--confirm-install', action='store_true', help='Confirm installation changes emulator state')
+    q.add_argument('--launch', action='store_true', help='Also send one launcher event (executes app code)')
+    q.add_argument('apks', nargs='+', help='APK files to copy and install, including base and all needed splits')
     q = cmd('work', 'Copy-based decode/build/align/sign workflow', work)
     stages = q.add_subparsers(dest='stage', required=True)
     i = stages.add_parser('init', help='Copy APK to a new workspace'); i.add_argument('apk'); i.add_argument('workspace')
     v = stages.add_parser('verify', help='Check alignment and signature of an APK in the workspace')
     v.add_argument('workspace'); v.add_argument('--input', help='APK inside workspace (default signed.apk)')
-    for stage in ('decode', 'build', 'align', 'sign'):
+    v.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Native library ZIP alignment in KiB (default 4)')
+    for stage in ('decode', 'jadx', 'build', 'align', 'sign'):
         s = stages.add_parser(stage, help=stage + ' within an APKLab workspace')
         s.add_argument('workspace'); s.add_argument('--input', help='Input path inside workspace')
         s.add_argument('--output', dest='output_path', help='New output path inside workspace')
+        if stage == 'align': s.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Native library ZIP alignment in KiB (default 4)')
         if stage == 'sign':
             s.add_argument('--keystore', required=True); s.add_argument('--alias', required=True)
             s.add_argument('--pass-env', required=True, help='Name of environment variable holding keystore password')

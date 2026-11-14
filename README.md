@@ -15,10 +15,12 @@ APKLab helps inspect Android packages, explore DEX and assets, and prepare modif
 | `doctor` | Find Android and analysis tools; optionally probe versions or help output. |
 | `setup` | Show a plan or attempt a limited installation through APT. |
 | `inspect` | Check APK ZIPs, native ABIs, metadata, and signatures, including multiple splits. |
-| `xapk` | Inspect and copy the contents of an XAPK into a new directory. |
+| `xapk` | Inspect, extract, or repack an XAPK without overwriting the original. |
 | `dex` | Index classes, method references, APIs, strings, URLs, and potential models. |
-| `inventory` | List assets and native libraries; optionally use `readelf`. |
-| `work` | Create a copy-based workspace for decoding, rebuilding, alignment, signing, and verification. |
+| `inventory` | List assets and native libraries; search bounded text and inspect native symbols. |
+| `work` | Create a copy-based workspace for apktool/JADX, rebuilding, alignment, signing, and verification. |
+| `splits` | Apply copy-based workflow stages across multiple APKs. |
+| `device` | Opt in to installation and optional launcher-event tests on a disposable emulator. |
 
 Some checks require external tools. Results are grouped into `verified`, `inferences`, `failures`, and `not_tested` so checks that were not run are not mistaken for successful ones.
 
@@ -96,14 +98,17 @@ Activate the virtual environment (`. .venv/bin/activate` on Linux/macOS), or rep
 ```sh
 apklab inspect app.apk
 apklab inspect base.apk split_config.arm64_v8a.apk
-apklab inspect ./split-directory --recursive --report inspection.json
+apklab inspect ./split-directory --recursive --device-abi arm64-v8a --report inspection.json
 apklab dex app.apk --search login --limit 50
-apklab inventory app.apk --search lib --native-details
+apklab inventory app.apk --search lib --native-details --native-symbols
+apklab inventory app.apk --text 'example.org'
 ```
 
 `inspect` checks ZIP CRCs, native ABI directories, and manifest presence. With `aapt` and `apksigner`, it also reads metadata and verifies signatures. For multiple APKs, available package names, version codes, and certificate digest sets are compared, and duplicate non-empty split names reported by `aapt` are flagged. Unavailable checks are marked `not_tested`; matching digests do not prove that a split set is complete or compatible. Base selection, split dependencies, device compatibility, signer rotation, and installation are not fully validated.
 
-`dex` indexes classes and method references, not runtime behavior or call graphs. URLs and model names are hints, not proof that a server is active or that model definitions are complete. Obfuscation, encrypted strings, dynamic DEX, and native code can hide information. `inventory` lists paths and sizes, not the contents of every asset.
+When metadata is available, `inspect` lists APKs without a reported split name as **base candidates**, not confirmed bases. `--device-abi` compares native directory names only; it does not establish compatibility or select the correct splits.
+
+`dex` indexes classes and method references, not runtime behavior or call graphs. URLs and model names are hints, not proof that a server is active or that model definitions are complete. Obfuscation, encrypted strings, dynamic DEX, and native code can hide information. `inventory --native-symbols` uses `readelf`; symbols may be stripped. `--text` searches UTF-8 assets/resources only, skips binary or entries over 1 MiB, reads at most 32 MiB total, and returns at most 200 excerpts. Results may contain sensitive data.
 
 ### Inspect and extract XAPKs
 
@@ -115,7 +120,16 @@ apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 
 `xapk inspect` lists entries; `--verify` reads each file, checks CRC, and computes SHA-256. `unpack` only reads the original archive and copies its contents into a **new** directory, checking CRC and hashes. Path traversal, duplicate or colliding paths, symlinks, special files, encrypted entries, and size-limit violations are rejected.
 
-APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. This does not validate manifest completeness, all APK contents, or OBB compatibility. If the manifest reports a failure after extraction, the copied directory may remain. XAPK repacking, OBB placement, device-specific split selection, and installation are not implemented.
+APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. This does not validate manifest completeness, all APK contents, or OBB compatibility. If the manifest reports a failure after extraction, the copied directory may remain.
+
+To create a **new** XAPK and replace selected APK entries with copies you have rebuilt and signed:
+
+```sh
+apklab xapk repack game.xapk ./modified.xapk --replace base.apk=/path/to/signed-base.apk
+apklab xapk inspect ./modified.xapk --verify
+```
+
+Repeat `--replace ENTRY=APK` for other APKs. Source paths are read-only, replacements must be ZIPs containing `AndroidManifest.xml`, and ZIP CRCs are checked. OBB and other entries are copied unchanged. The manifest is **not rewritten**; version, size or checksum fields may be stale. Signature compatibility, OBB compatibility, installer support, device-specific split selection, and app behavior are not verified.
 
 Default APK limits are 100,000 entries, 64 MiB per entry, and 512 MiB total uncompressed. For XAPK, the default size limits are 2,048 MiB per entry and 8,192 MiB total. Adjust them deliberately with `--max-entry-mib` and `--max-total-mib`; higher limits may use substantial memory, CPU, and disk space. CRC is not a substitute for signature verification. `.apks` containers are not extracted automatically.
 
@@ -124,17 +138,48 @@ Default APK limits are 100,000 entries, 64 MiB per entry, and 512 MiB total unco
 ```sh
 apklab work init app.apk ./apklab-work-example
 apklab work decode ./apklab-work-example
+apklab work jadx ./apklab-work-example   # optional: read decompiled source
 # Edit only files in apklab-work-example/decoded.
 apklab work build ./apklab-work-example
-apklab work align ./apklab-work-example
+apklab work align ./apklab-work-example --page-size 16
 apklab work sign ./apklab-work-example --keystore /secure/path/key.jks --alias mykey --pass-env APKLAB_KS_PASS
-apklab work verify ./apklab-work-example
+apklab work verify ./apklab-work-example --page-size 16
 apklab inspect ./apklab-work-example/signed.apk
 ```
 
-The workspace must be new; `original.apk` is a copy. Stages use separately installed `apktool`, `zipalign`, and `apksigner`. Outputs must be new and inside the workspace; `--input` and `--output` can change paths within it. Set the password in an environment variable using a secure local method, not in commands, reports, or Git. Separate key passwords, hardware tokens, and rebuilding a split set are not supported.
+The workspace must be new; `original.apk` is a copy. Stages use separately installed `apktool`, `jadx`, `zipalign`, and `apksigner`. `work jadx` writes decompiled Java into a new workspace directory; its output is for analysis, not a rebuildable source project. Outputs must be new and inside the workspace; `--input` and `--output` can change paths within it. Set the password in an environment variable using a secure local method, not in commands, reports, or Git. Separate key passwords and hardware tokens are not supported.
 
-`work verify` independently invokes `zipalign -c -p 4` and `apksigner verify` on `signed.apk`, or on a workspace file selected with `--input`. Missing tools are reported as `not_tested`; an exit code of 0 does not mean both checks ran. This checks the specified alignment and signature, not 16 KiB page-size compatibility, signer compatibility with the original, installability, or app behavior. Test installation and behavior only on an authorized, isolated device or emulator. A different signing key may prevent updates to the original app or affect integrations. Not every APK can be rebuilt unchanged with apktool.
+`--page-size 16` requires a `zipalign` version advertising `-P` support, such as Android build tools 35.0.0 or later. It aligns/checks uncompressed native libraries in the ZIP; it **does not verify ELF load-segment alignment**, overall 16 KiB device compatibility, or runtime behavior. The default is 4 KiB. `work verify` also invokes `apksigner verify`; missing tools or unsupported 16 KiB checks are `not_tested`, so exit code 0 does not mean both checks ran.
+
+Test installation and behavior only on an authorized, isolated device or emulator. A different signing key may prevent updates to the original app or affect integrations. Not every APK can be rebuilt unchanged with apktool.
+
+### Split workspaces
+
+Create a new workspace from APK files, then run the same stage on each copy. This does not automatically select splits or validate the set:
+
+```sh
+apklab splits init ./split-work base.apk split_config.arm64_v8a.apk
+apklab splits run ./split-work decode
+# Edit each apk-NNNN/decoded directory as needed.
+apklab splits run ./split-work build
+apklab splits run ./split-work align --page-size 16
+apklab splits run ./split-work sign --keystore /secure/path/key.jks --alias mykey --pass-env APKLAB_KS_PASS
+apklab splits run ./split-work verify --page-size 16
+apklab inspect ./split-work/apk-0000/signed.apk ./split-work/apk-0001/signed.apk
+```
+
+Every signing operation uses the supplied keystore and alias; independently compare verified signer digests with `inspect`. Original-copy SHA-256 values are checked before each stage. Stages may partially succeed: read each member report. Existing outputs are never overwritten; use a new workspace or handle failed members individually. Set completeness, installer compatibility, device targeting, and behavior are not guaranteed.
+
+### Disposable-emulator test
+
+`device` reads temporary copies of the selected APKs and explicitly changes emulator state. Use only a **disposable, isolated, single-user emulator** with no personal data. Installing or launching an APK can execute untrusted code and access the network; isolate networking as appropriate. Physical device serials are rejected, but identity checks cannot guarantee the environment is safe.
+
+```sh
+apklab device --serial emulator-5554 --confirm-install ./apklab-work-example/signed.apk
+# Add --launch only when you intend to execute app code.
+```
+
+For split sets, supply the base and all required split APK paths. The command requires `adb`, `aapt`, and `apksigner`; checks emulator identity, package/version/signer consistency, and refuses an already installed package. It does not install OBBs, select splits, uninstall the app, or prove app functionality. A launcher event is not proof of successful execution. Failure may leave a partially changed emulator; discard the disposable emulator when finished.
 
 ### Reports
 
@@ -158,7 +203,9 @@ Most tests use synthetic APK/DEX files and mocks for metadata, signing, and exte
 APKLAB_INTEGRATION_APK=/path/to/authorized-test.apk python3 -m unittest discover -s tests -p test_integration.py -v
 ```
 
-Without `APKLAB_INTEGRATION_APK`, this test is skipped. When explicitly enabled, it fails if required tools are missing. The GitHub Actions workflow runs unit tests across Python versions and operating systems, plus the real-tool integration test on Linux using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. The real-tool round trip has passed in CI on Linux; check the current workflow results for the latest status. Device/emulator installation and runtime behavior have not been tested.
+Without `APKLAB_INTEGRATION_APK`, this test is skipped. When enabled, missing required tools cause failure. Set `APKLAB_TEST_16K=1`, `APKLAB_TEST_JADX=1`, or `APKLAB_TEST_SPLITS=1` to opt into the corresponding checks; the split test uses two copies of one APK, not a genuine split set. `APKLAB_EMULATOR_SERIAL=emulator-5554` additionally installs and launches the test APK on that emulator. Only use a disposable, isolated emulator.
+
+GitHub Actions is configured for cross-platform unit tests, real Android tools, and a disposable-emulator test using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. The earlier single-APK round trip passed on Linux. Consult the current workflow results before claiming the new tests passed; installing or launching a sample does not prove that another APK or game will work.
 
 ## License
 
