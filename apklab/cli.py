@@ -3,11 +3,13 @@ import os
 import re
 import sys
 import zipfile
+import zlib
 from pathlib import Path
 from . import __version__
 from .core import TOOLS, add, emit, find_tool, inspect_one, report, run, zip_infos
 from .dex import read_dex
 from .workflow import init, perform
+from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, manifest_info
 
 
 def doctor(args):
@@ -69,11 +71,12 @@ def find_executable(name):
     return shutil.which(name)
 
 
-def apk_paths(inputs):
+def apk_paths(inputs, recursive=False):
     paths = []
     for name in inputs:
         p = Path(name)
-        if p.is_dir(): paths.extend(sorted(p.glob('*.apk')))
+        if p.is_dir():
+            paths.extend(sorted(x for x in (p.rglob('*') if recursive else p.iterdir()) if x.is_file() and x.suffix.lower() == '.apk'))
         else: paths.append(p)
     if not paths: raise ValueError('No APK files found')
     return paths
@@ -81,13 +84,53 @@ def apk_paths(inputs):
 
 def inspect(args):
     r = report()
-    r['apks'] = [inspect_one(p, r) for p in apk_paths(args.apks)]
-    packages = {a['package'] for a in r['apks'] if a['package']}
-    versions = {a['version_code'] for a in r['apks'] if a['version_code']}
-    if len(packages) > 1 or len(versions) > 1:
-        add(r, 'failures', 'split set', 'Package names or version codes differ between APKs')
-    elif len(r['apks']) > 1:
-        add(r, 'not_tested', 'split set', 'Full split compatibility, signing identity and installation not verified')
+    r['apks'] = [inspect_one(p, r, args.max_entry_mib * MIB, args.max_total_mib * MIB) for p in apk_paths(args.apks, args.recursive)]
+    if len(r['apks']) > 1:
+        for field, label in [('package', 'package names'), ('version_code', 'version codes'), ('signer_sha256', 'signer certificate digest sets')]:
+            values = [tuple(a[field]) if field == 'signer_sha256' and a[field] else a[field] for a in r['apks']]
+            known = {v for v in values if v}
+            if len(known) > 1:
+                add(r, 'failures', 'split set', 'Different ' + label + ' found')
+            elif len(known) == 1 and all(values):
+                add(r, 'verified', 'split set', 'Matching ' + label + ' across all inspected APKs')
+            else:
+                add(r, 'not_tested', 'split set', 'Cannot compare ' + label + ' for every APK')
+        add(r, 'not_tested', 'split set', 'Completeness, split dependencies, signer rotation compatibility and installation not verified')
+    return r
+
+
+def xapk(args):
+    r = report()
+    entry, total = args.max_entry_mib * MIB, args.max_total_mib * MIB
+    if args.action == 'inspect':
+        entries = examine_xapk(args.archive, entry, total, args.verify)
+        r['entries'] = entries
+        add(r, 'verified', 'XAPK', 'Archive directory and paths checked against safety limits')
+        if args.verify:
+            add(r, 'verified', 'XAPK', 'All file entries decompressed and CRC-checked; SHA-256 hashes recorded')
+        else:
+            add(r, 'not_tested', 'XAPK CRC', 'Use --verify to read and CRC-check all file entries')
+    else:
+        entries = unpack_xapk(args.archive, args.destination, entry, total)
+        r['entries'] = entries
+        add(r, 'verified', 'XAPK', 'Entries copied to a new directory with CRC checks and SHA-256 hashes')
+        r['destination'] = str(Path(args.destination).resolve())
+    if not any(i['kind'] == 'apk' for i in entries):
+        add(r, 'failures', 'XAPK', 'No APK entries found')
+    manifest = manifest_info(args.archive, entries)
+    r['manifest'] = manifest
+    if manifest['status'] == 'parsed':
+        add(r, 'verified', 'XAPK manifest', 'Compared split_apks file references against archive entry names')
+        if manifest['missing_apks'] or manifest['duplicate_references']:
+            add(r, 'failures', 'XAPK manifest', 'Referenced APKs missing or duplicated: see manifest details')
+        if manifest['undeclared_apks']:
+            add(r, 'inferences', 'XAPK manifest', 'Archive has APKs not listed in split_apks; their role is unknown')
+    elif manifest['status'] == 'invalid':
+        add(r, 'failures', 'XAPK manifest', manifest['reason'])
+    else:
+        add(r, 'not_tested', 'XAPK manifest', 'No supported split_apks list: ' + manifest.get('reason', manifest['status']))
+    add(r, 'not_tested', 'contained APKs', 'APK metadata, signatures and split compatibility are not checked here; run inspect on extracted APKs')
+    add(r, 'not_tested', 'XAPK layout', 'Manifest completeness, OBB compatibility and installation are not validated')
     return r
 
 
@@ -95,7 +138,7 @@ def inventory(args):
     r = report()
     r['files'] = []
     with zipfile.ZipFile(args.apk) as z:
-        infos = zip_infos(z)
+        infos = zip_infos(z, args.max_entry_mib * MIB, args.max_total_mib * MIB)
         for info in infos:
             n = info.filename
             category = 'native' if n.startswith('lib/') and n.endswith('.so') else 'asset' if n.startswith(('assets/', 'res/')) else None
@@ -122,7 +165,7 @@ def dex(args):
     r = report()
     r['dex_files'] = []
     with zipfile.ZipFile(args.apk) as z:
-        infos = zip_infos(z)
+        infos = zip_infos(z, args.max_entry_mib * MIB, args.max_total_mib * MIB)
         names = [i.filename for i in infos if re.fullmatch(r'classes(?:[2-9][0-9]*|1[0-9]+)?\.dex', i.filename)]
         if not names: add(r, 'not_tested', 'DEX', 'No root classes*.dex found')
         for name in names:
@@ -158,6 +201,11 @@ def work(args):
     return r
 
 
+def zip_limits(p):
+    p.add_argument('--max-entry-mib', type=int, default=64, help='Max uncompressed entry size in MiB (default 64)')
+    p.add_argument('--max-total-mib', type=int, default=512, help='Max total uncompressed size in MiB (default 512)')
+
+
 def parser():
     p = argparse.ArgumentParser(prog='apklab', description='APKLab: evidence-oriented APK analysis and copy-based workflows')
     p.add_argument('--version', action='version', version='%(prog)s ' + __version__)
@@ -172,12 +220,25 @@ def parser():
     q.add_argument('--install', action='store_true', help='Actually install missing packages using configured APT repositories')
     q = cmd('inspect', 'Inspect one APK or a split set (files or directories)', inspect)
     q.add_argument('apks', nargs='+')
+    q.add_argument('--recursive', action='store_true', help='Include APKs in subdirectories of supplied directories')
+    zip_limits(q)
+    q = cmd('xapk', 'Safely inspect or unpack XAPK archives', xapk)
+    actions = q.add_subparsers(dest='action', required=True)
+    for action in ('inspect', 'unpack'):
+        x = actions.add_parser(action, help=action + ' an XAPK archive')
+        x.add_argument('archive')
+        if action == 'unpack': x.add_argument('destination', help='New directory; parent must exist')
+        else: x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
+        x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
+        x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
     q = cmd('inventory', 'List asset and native library paths', inventory)
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive path substring')
     q.add_argument('--native-details', action='store_true', help='Run readelf for matching native libraries')
+    zip_limits(q)
     q = cmd('dex', 'Index DEX classes, methods, API references, strings, URLs, and possible models', dex)
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive substring filter')
     q.add_argument('--limit', type=int, default=200, help='Maximum entries per list (default 200)')
+    zip_limits(q)
     q = cmd('work', 'Copy-based decode/build/align/sign workflow', work)
     stages = q.add_subparsers(dest='stage', required=True)
     i = stages.add_parser('init', help='Copy APK to a new workspace'); i.add_argument('apk'); i.add_argument('workspace')
@@ -196,7 +257,7 @@ def main(argv=None):
     try:
         if getattr(args, 'limit', 1) < 1: raise ValueError('--limit must be positive')
         r = args.func(args)
-    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as e:
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError, EOFError, zlib.error) as e:
         r = report(); add(r, 'failures', args.command, str(e))
     try:
         emit(r, args.report)
