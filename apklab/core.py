@@ -10,7 +10,7 @@ from pathlib import Path
 MAX_ENTRY = 64 * 1024 * 1024
 MAX_TOTAL = 512 * 1024 * 1024
 TOOLS = {
-    "java": ["java"], "jadx": ["jadx"], "apktool": ["apktool"],
+    "java": ["java"], "keytool": ["keytool"], "jadx": ["jadx"], "apktool": ["apktool"],
     "adb": ["adb"], "emulator": ["emulator"], "zipalign": ["zipalign"],
     "apksigner": ["apksigner"], "aapt": ["aapt"], "aapt2": ["aapt2"],
     "ghidra": ["ghidraRun", "ghidra"], "apkanalyzer": ["apkanalyzer"],

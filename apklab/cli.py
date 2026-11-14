@@ -8,24 +8,43 @@ from pathlib import Path
 from . import __version__
 from .core import TOOLS, add, emit, find_tool, inspect_one, report, run, zip_infos
 from .dex import read_dex
-from .workflow import init, perform
+from .workflow import init, perform, workspace_input
 from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, manifest_info
+
+
+VERSION_ARGS = {
+    'java': ['-version'], 'keytool': ['-help'], 'jadx': ['--version'],
+    'apktool': ['--version'], 'adb': ['version'], 'emulator': ['-version'],
+    'apksigner': ['version'], 'aapt': ['version'], 'aapt2': ['version'],
+    'readelf': ['--version'], 'strings': ['--version'],
+}
 
 
 def doctor(args):
     r = report()
     r['tools'] = {}
+    if args.check: r['probes'] = {}
     for name in TOOLS:
         path = find_tool(name)
         r['tools'][name] = path
-        if path: add(r, 'verified', name, 'Executable found: ' + path + ' (functionality not verified)')
+        if path:
+            add(r, 'verified', name, 'Executable found: ' + path + ' (presence only)')
+            if args.check and name in VERSION_ARGS:
+                result = run([path] + VERSION_ARGS[name], timeout=10)
+                r['probes'][name] = {'returncode': result['returncode'], 'output': (result['stdout'] or result['stderr'])[:2000]}
+                if result['returncode'] == 0:
+                    add(r, 'verified', name, 'Version/help probe exited successfully; full functionality is not verified')
+                else:
+                    add(r, 'not_tested', name, 'Version/help probe did not succeed; inspect probes for details')
+            elif args.check:
+                add(r, 'not_tested', name, 'No safe version probe configured')
         else: add(r, 'not_tested', name, 'Not found')
     sdk = os.environ.get('ANDROID_SDK_ROOT') or os.environ.get('ANDROID_HOME')
     if not sdk and (Path.home() / 'Android/Sdk').is_dir(): sdk = str(Path.home() / 'Android/Sdk')
     r['android_sdk'] = sdk
     if sdk and Path(sdk).is_dir(): add(r, 'verified', 'Android SDK', 'Directory exists: ' + sdk)
     else: add(r, 'not_tested', 'Android SDK', 'SDK directory not found')
-    add(r, 'not_tested', 'tool functionality', 'Presence checks do not confirm versions or operation')
+    add(r, 'not_tested', 'tool functionality', 'A presence or version/help probe does not verify complete functionality')
     return r
 
 
@@ -50,7 +69,7 @@ def setup(args):
         prefix = [sudo, '-n']
     missing = {tool: pkg for tool, pkg in packages.items() if not find_tool(tool)}
     if missing:
-        res = run(prefix + [apt, '-o', 'Acquire::Retries=0', '-o', 'Acquire::http::Timeout=10', '-o', 'Acquire::https::Timeout=10', 'update'], timeout=180)
+        res = run(prefix + [apt, '-o', 'APT::Update::Error-Mode=any', '-o', 'Acquire::Retries=0', '-o', 'Acquire::http::Timeout=10', '-o', 'Acquire::https::Timeout=10', 'update'], timeout=180)
         if res['returncode'] != 0:
             add(r, 'failures', 'apt update', (res['stderr'] or res['stdout'])[-3000:])
         for tool, pkg in missing.items():
@@ -95,6 +114,11 @@ def inspect(args):
                 add(r, 'verified', 'split set', 'Matching ' + label + ' across all inspected APKs')
             else:
                 add(r, 'not_tested', 'split set', 'Cannot compare ' + label + ' for every APK')
+        split_names = [a.get('split') for a in r['apks'] if a.get('split')]
+        if len(split_names) != len(set(split_names)):
+            add(r, 'failures', 'split set', 'Duplicate non-empty split names found in aapt metadata')
+        if not all(a.get('package') for a in r['apks']):
+            add(r, 'not_tested', 'split names', 'Metadata unavailable for one or more APKs')
         add(r, 'not_tested', 'split set', 'Completeness, split dependencies, signer rotation compatibility and installation not verified')
     return r
 
@@ -139,10 +163,12 @@ def inventory(args):
     r['files'] = []
     with zipfile.ZipFile(args.apk) as z:
         infos = zip_infos(z, args.max_entry_mib * MIB, args.max_total_mib * MIB)
+        matches = []
         for info in infos:
             n = info.filename
             category = 'native' if n.startswith('lib/') and n.endswith('.so') else 'asset' if n.startswith(('assets/', 'res/')) else None
             if category and (not args.search or args.search.lower() in n.lower()):
+                matches.append(info)
                 r['files'].append({'path': n, 'size': info.file_size, 'category': category})
         add(r, 'verified', 'inventory', 'Indexed matching ZIP entry names and sizes; file contents not validated')
         if args.native_details:
@@ -150,11 +176,14 @@ def inventory(args):
             tool = find_tool('readelf')
             if not tool: add(r, 'not_tested', 'native details', 'readelf not found')
             else:
-                for item in r['files']:
+                import shutil
+                for info, item in zip(matches, r['files']):
                     if item['category'] != 'native': continue
-                    with tempfile.NamedTemporaryFile() as tmp:
-                        tmp.write(z.read(item['path'])); tmp.flush()
-                        res = run([tool, '-h', '-d', tmp.name])
+                    with tempfile.TemporaryDirectory(prefix='apklab-native-') as tmp:
+                        native = Path(tmp) / 'library.so'
+                        with z.open(info) as source, native.open('xb') as output:
+                            shutil.copyfileobj(source, output, length=1024 * 1024)
+                        res = run([tool, '-h', '-d', native])
                     item['readelf'] = res['stdout'][:20000]
                     if res['returncode'] != 0: add(r, 'failures', item['path'], 'readelf failed: ' + res['stderr'][:500])
                     else: add(r, 'verified', item['path'], 'readelf header and dynamic section')
@@ -191,6 +220,21 @@ def work(args):
     if args.stage == 'init':
         dest = init(args.apk, args.workspace)
         add(r, 'verified', 'workspace', 'Copied input to ' + dest + '/original.apk')
+    elif args.stage == 'verify':
+        src = workspace_input(args.workspace, args.input or 'signed.apk')
+        r['checks'] = {}
+        for name, flags in [('zipalign', ['-c', '-p', '4']), ('apksigner', ['verify', '--verbose', '--print-certs'])]:
+            tool = find_tool(name)
+            if not tool:
+                add(r, 'not_tested', name, 'Executable not found')
+                continue
+            result = run([tool] + flags + [src], timeout=120)
+            r['checks'][name] = result
+            if result['returncode'] == 0:
+                add(r, 'verified', name, 'Verification command succeeded for ' + str(src))
+            else:
+                add(r, 'failures', name, 'Verification command failed: ' + (result['stderr'] or result['stdout'])[:2000])
+        add(r, 'not_tested', 'runtime', 'Installability, signature identity compatibility, and app behavior are not verified')
     else:
         dest, result = perform(args.stage, args.workspace, args.input, args.output_path,
                                getattr(args, 'keystore', None), getattr(args, 'alias', None), getattr(args, 'pass_env', None))
@@ -215,7 +259,8 @@ def parser():
         q.set_defaults(func=func)
         q.add_argument('--report', metavar='FILE', help='Write JSON report to a new file (never overwrite)')
         return q
-    cmd('doctor', 'Find external Android and analysis tools', doctor)
+    q = cmd('doctor', 'Find external Android and analysis tools', doctor)
+    q.add_argument('--check', action='store_true', help='Run limited version/help probes where supported')
     q = cmd('setup', 'Show or attempt a limited APT installation plan', setup)
     q.add_argument('--install', action='store_true', help='Actually install missing packages using configured APT repositories')
     q = cmd('inspect', 'Inspect one APK or a split set (files or directories)', inspect)
@@ -242,6 +287,8 @@ def parser():
     q = cmd('work', 'Copy-based decode/build/align/sign workflow', work)
     stages = q.add_subparsers(dest='stage', required=True)
     i = stages.add_parser('init', help='Copy APK to a new workspace'); i.add_argument('apk'); i.add_argument('workspace')
+    v = stages.add_parser('verify', help='Check alignment and signature of an APK in the workspace')
+    v.add_argument('workspace'); v.add_argument('--input', help='APK inside workspace (default signed.apk)')
     for stage in ('decode', 'build', 'align', 'sign'):
         s = stages.add_parser(stage, help=stage + ' within an APKLab workspace')
         s.add_argument('workspace'); s.add_argument('--input', help='Input path inside workspace')

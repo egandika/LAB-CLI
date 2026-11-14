@@ -30,6 +30,17 @@ def output_path(workspace, path):
     return root, p
 
 
+def workspace_input(workspace, source):
+    root = Path(workspace).resolve(strict=True)
+    if not root.is_dir() or not (root / 'original.apk').is_file():
+        raise ValueError('Not an APKLab workspace (original.apk missing)')
+    src = Path(source)
+    src = (root / src).resolve() if not src.is_absolute() else src.resolve()
+    if not src.is_relative_to(root) or not src.is_file():
+        raise ValueError('Input must be an existing file inside workspace')
+    return src
+
+
 def perform(stage, workspace, source=None, output=None, keystore=None, alias=None, pass_env=None):
     defaults = {'decode': 'decoded', 'build': 'rebuilt.apk', 'align': 'aligned.apk', 'sign': 'signed.apk'}
     root, dest = output_path(workspace, output or defaults[stage])
