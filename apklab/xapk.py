@@ -129,3 +129,61 @@ def manifest_info(path, entries):
             'missing_apks': sorted(set(filenames) - apk_paths),
             'undeclared_apks': sorted(apk_paths - set(filenames)),
             'duplicate_references': sorted(x for x, count in Counter(filenames).items() if count > 1)}
+
+
+def repack(path, destination, replacements, max_entry, max_total):
+    """Copy a validated archive into a new XAPK, optionally replacing APK entries."""
+    import copy
+    from .core import zip_infos
+    dest = Path(destination)
+    with zipfile.ZipFile(path) as source:
+        infos = validate(source, max_entry, max_total)
+        files = {i.filename: i for i in infos if not i.is_dir()}
+        if not any(n.lower().endswith('.apk') for n in files):
+            raise ValueError('No APK entries found in archive')
+        for entry, replacement in replacements.items():
+            p = Path(replacement)
+            if entry not in files or not entry.lower().endswith('.apk'):
+                raise ValueError('Replacement target must be an existing APK entry: ' + entry)
+            if not p.is_file() or p.suffix.lower() != '.apk':
+                raise ValueError('Replacement must be an APK file: ' + str(p))
+            with zipfile.ZipFile(p) as apk:
+                apk_infos = zip_infos(apk, max_entry, max_total)
+                if 'AndroidManifest.xml' not in {i.filename for i in apk_infos}:
+                    raise ValueError('Replacement has no AndroidManifest.xml: ' + str(p))
+                bad = apk.testzip()
+                if bad: raise ValueError('Replacement APK failed CRC: ' + bad)
+        total = sum(Path(replacements[i.filename]).stat().st_size if i.filename in replacements else i.file_size for i in infos)
+        if total > max_total: raise ValueError('Repacked archive exceeds total size limit')
+        if any(Path(p).stat().st_size > max_entry for p in replacements.values()):
+            raise ValueError('Replacement APK exceeds entry size limit')
+        with dest.open('xb') as out_file:
+            try:
+                with zipfile.ZipFile(out_file, 'w', allowZip64=True) as output:
+                    items = summarize(infos)
+                    for info, item in zip(infos, items):
+                        new_info = copy.copy(info)
+                        new_info.file_size = Path(replacements[info.filename]).stat().st_size if info.filename in replacements else info.file_size
+                        if info.is_dir():
+                            output.writestr(new_info, b'')
+                        else:
+                            with output.open(new_info, 'w') as target:
+                                if info.filename not in replacements:
+                                    item['sha256'] = stream_entry(source, info, target)
+                                else:
+                                    digest = hashlib.sha256(); size = 0
+                                    with open(replacements[info.filename], 'rb') as replacement:
+                                        while True:
+                                            chunk = replacement.read(CHUNK)
+                                            if not chunk: break
+                                            size += len(chunk)
+                                            if size > new_info.file_size: raise ValueError('Replacement size changed during repack')
+                                            digest.update(chunk); target.write(chunk)
+                                    if size != new_info.file_size: raise ValueError('Replacement size changed during repack')
+                                    item.update(size=size, sha256=digest.hexdigest(), replaced=True)
+                return items
+            except BaseException:
+                # Only a file created exclusively by this operation can be removed.
+                out_file.close()
+                dest.unlink(missing_ok=True)
+                raise

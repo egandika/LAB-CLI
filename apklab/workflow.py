@@ -41,20 +41,32 @@ def workspace_input(workspace, source):
     return src
 
 
-def perform(stage, workspace, source=None, output=None, keystore=None, alias=None, pass_env=None):
-    defaults = {'decode': 'decoded', 'build': 'rebuilt.apk', 'align': 'aligned.apk', 'sign': 'signed.apk'}
+def supports_16k(tool):
+    result = run([tool, '-h'], timeout=10)
+    import re
+    return bool(re.search(r'(?<!\w)-P(?:\s|,|<)', result['stdout'] + '\n' + result['stderr']))
+
+
+def perform(stage, workspace, source=None, output=None, keystore=None, alias=None, pass_env=None, page_size=4):
+    defaults = {'decode': 'decoded', 'jadx': 'jadx', 'build': 'rebuilt.apk', 'align': 'aligned.apk', 'sign': 'signed.apk'}
     root, dest = output_path(workspace, output or defaults[stage])
-    toolname = {'decode': 'apktool', 'build': 'apktool', 'align': 'zipalign', 'sign': 'apksigner'}[stage]
+    toolname = {'decode': 'apktool', 'jadx': 'jadx', 'build': 'apktool', 'align': 'zipalign', 'sign': 'apksigner'}[stage]
     tool = find_tool(toolname)
     if not tool: raise ValueError(toolname + ' not found; run apklab doctor')
-    defaults_in = {'decode': 'original.apk', 'build': 'decoded', 'align': 'rebuilt.apk', 'sign': 'aligned.apk'}
+    defaults_in = {'decode': 'original.apk', 'jadx': 'original.apk', 'build': 'decoded', 'align': 'rebuilt.apk', 'sign': 'aligned.apk'}
     src = Path(source or defaults_in[stage])
     src = (root / src).resolve() if not src.is_absolute() else src.resolve()
     if not src.is_relative_to(root) or not src.exists():
         raise ValueError('Input must exist inside workspace')
     if stage == 'decode': args = [tool, 'd', str(src), '-o', str(dest)]
+    elif stage == 'jadx':
+        if not src.is_file(): raise ValueError('JADX input must be a file')
+        args = [tool, '--no-res', '-d', str(dest), str(src)]
     elif stage == 'build': args = [tool, 'b', str(src), '-o', str(dest)]
-    elif stage == 'align': args = [tool, '-p', '4', str(src), str(dest)]
+    elif stage == 'align':
+        if page_size == 16 and not supports_16k(tool):
+            raise ValueError('zipalign does not advertise -P; Android build tools with 16 KiB support are required')
+        args = [tool] + (['-P', '16'] if page_size == 16 else ['-p']) + ['4', str(src), str(dest)]
     else:
         if not keystore or not alias or not pass_env:
             raise ValueError('sign requires --keystore, --alias and --pass-env (environment variable name)')
