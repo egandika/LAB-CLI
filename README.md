@@ -1,101 +1,159 @@
 # APKLab
 
-APKLab is a general-purpose, evidence-oriented CLI for analyzing Android APKs and preparing copy-based modification workflows. It does **not** automatically recreate a server or prove that a modified app works. Analyze only software you are authorized to examine. Treat APKs, extracted data and third-party tools as untrusted; use an isolated environment.
+**Toolkit CLI untuk inspeksi APK/XAPK dan alur analisis Android berbasis salinan.**
 
-## Install
+[Lisensi MIT](LICENSE) · Python 3.9+ · Dirancang untuk pengguna dan AI agent
 
-Python 3.9+, Git and pip/venv are needed. From an existing checkout (tested):
+APKLab membantu memeriksa paket Android, menelusuri DEX dan aset, serta menyiapkan alur modifikasi tanpa mengubah file asli. Toolkit ini bersifat umum dan tidak bergantung pada satu aplikasi atau game tertentu.
+
+> Gunakan hanya pada aplikasi yang berwenang Anda analisis. Hasil rebuild atau signing **tidak menjamin** aplikasi dapat dipasang atau dimainkan. Perlakukan APK, XAPK, dan alat pihak ketiga sebagai input tidak tepercaya.
+
+## Fitur
+
+| Perintah | Kegunaan |
+| --- | --- |
+| `doctor` | Mencari alat Android dan analisis yang tersedia. |
+| `setup` | Menampilkan rencana atau mencoba pemasangan terbatas melalui APT. |
+| `inspect` | Memeriksa ZIP, ABI native, metadata dan signature APK, termasuk beberapa split. |
+| `xapk` | Memeriksa dan menyalin isi XAPK ke direktori baru. |
+| `dex` | Mengindeks kelas, referensi metode, API, string, URL, dan kandidat model. |
+| `inventory` | Mendata aset dan library native; dapat menggunakan `readelf`. |
+| `work` | Membuat workspace salinan untuk decode, rebuild, alignment, dan signing. |
+
+Beberapa pemeriksaan memerlukan alat eksternal. Hasil dikelompokkan sebagai `verified`, `inferences`, `failures`, dan `not_tested` agar pemeriksaan yang tidak dijalankan tidak dianggap berhasil.
+
+## Instalasi
+
+Persyaratan: Python 3.9+, Git, pip/venv, serta akses ke GitHub dan indeks paket untuk dependensi build. Contoh berikut untuk Linux/macOS:
 
 ```sh
 python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install .
-apklab --help
-apklab doctor
+.venv/bin/python -m pip install 'git+https://github.com/egad13744-collab/LAB-CLI.git'
+.venv/bin/apklab --help
+.venv/bin/apklab doctor
 ```
 
-For a new conversation after these changes have been **merged into the repository's default branch**, the intended GitHub installation is:
+Pada Windows, executable virtual environment berada di `.venv\Scripts\`. APKLab tidak menyertakan APK atau alat Android. Instalasi langsung di atas memasang CLI, tetapi tidak membuat checkout untuk membaca panduan repo. Untuk hasil yang dapat direproduksi, gunakan commit atau tag yang telah ditinjau.
+
+### Instalasi untuk AI agent
+
+Agent memerlukan akses terminal dan jaringan. Jika tidak tersedia, agent harus menjelaskan hambatannya. Untuk memasang sekaligus membaca panduan, jalankan dari direktori kerja yang aman:
 
 ```sh
+git clone https://github.com/egad13744-collab/LAB-CLI.git apklab-toolkit
+cd apklab-toolkit
+cat README.md AGENTS.md
 python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install 'git+https://github.com/egad13744-collab/LAB-CLI.git'
-apklab --help
-apklab doctor
+.venv/bin/python -m pip install .
+.venv/bin/apklab --help
+.venv/bin/apklab doctor
 ```
 
-The GitHub command was tested with version 0.1.0 on the default branch. It cannot install newer changes until they are merged there. Once published, prefer a reviewed commit SHA or a release tag over a mutable branch. Venv activation above is for Unix; on Windows use `.venv\Scripts\activate`. The CLI has no runtime Python dependencies; pip's build isolation obtains setuptools from the configured package index. No APK or external tool is bundled.
+Jika `apklab-toolkit` sudah ada, gunakan checkout yang benar atau pilih nama direktori baru—jangan hapus atau timpa file yang ada. Jika setiap perintah agent dimulai dari direktori berbeda, masuk kembali ke checkout atau gunakan path lengkap ke `.venv/bin/apklab`. Langkah clone dan instalasi dari checkout telah diuji dengan APKLab 0.2.0 pada Linux.
 
-### Prompt untuk percakapan AI baru
+### Prompt siap salin untuk agent
 
-Setelah perubahan masuk ke branch utama, salin prompt berikut ke percakapan baru dan berikan APK yang berwenang Anda analisis:
+Ganti `[LOKASI_FILE]` dengan lokasi APK/XAPK yang dapat diakses agent, atau beri tahu agent bahwa file akan disediakan kemudian.
 
-> Instal APKLab dengan `python -m pip install 'git+https://github.com/egad13744-collab/LAB-CLI.git'` dalam virtual environment. Baca README dan AGENTS.md, jalankan `apklab --help` dan `apklab doctor`, lalu bantu analisis APK/XAPK saya pada salinannya. Pisahkan hasil terverifikasi, dugaan, kegagalan, dan yang belum diuji. Jangan instal atau hubungkan layanan eksternal tanpa rencana dan persetujuan saya.
+```text
+Bantu saya menganalisis APK/XAPK yang saya berwenang gunakan.
+Lokasi file: [LOKASI_FILE]
 
-## Discover and install tools
+Jika APKLab belum tersedia, clone https://github.com/egad13744-collab/LAB-CLI.git ke direktori baru, baca README.md dan AGENTS.md, lalu instal APKLab dalam virtual environment. Jalankan apklab --help dan apklab doctor. Jika tidak bisa mengakses terminal atau menginstal, jelaskan hambatannya.
+
+Bekerjalah pada salinan dan jangan ubah atau hapus file asli. Untuk XAPK, periksa dan ekstrak ke direktori baru sebelum memeriksa APK di dalamnya. Jangan memasukkan file aplikasi, hasil ekstraksi, kredensial, atau data pribadi ke Git. Jika alat tambahan diperlukan, jelaskan rencana dan minta persetujuan sebelum memasangnya.
+
+Pisahkan hasil terverifikasi, dugaan, kegagalan, dan yang belum diuji. Jangan mengklaim APK bisa dipasang atau dimainkan tanpa pengujian, dan jangan menganggap kode atau data server tersedia dalam APK.
+```
+
+## Pemeriksaan dan pemasangan alat
 
 ```sh
 apklab doctor
-apklab setup                 # plan only; does not install
-apklab setup --install       # opt-in: modifies system via apt-get
+apklab setup                 # tampilkan rencana; tidak memasang alat
+apklab setup --install       # opt-in: mencoba memasang paket melalui APT
 ```
 
-`doctor` searches PATH, `ANDROID_SDK_ROOT`, `ANDROID_HOME`, `~/Android/Sdk` and, for Ghidra, `GHIDRA_HOME`. It checks executable presence, not whether tools run correctly. `setup --install` is an optional Debian/Ubuntu APT attempt using the machine's configured repositories; it runs `apt-get update` then tries missing `default-jre-headless`, `apktool`, `adb`, `aapt`, `zipalign`, and `apksigner`, and checks executable presence. It requires root or passwordless sudo; it never prompts for a password. Review APT repository configuration and the plan first. Failures are reported individually, and other platforms must install tools manually.
+`doctor` mencari executable melalui PATH, `ANDROID_SDK_ROOT`, `ANDROID_HOME`, `~/Android/Sdk`, dan `GHIDRA_HOME` untuk Ghidra. Penemuan executable **belum membuktikan** bahwa alat berfungsi. Misalnya, metadata paket memerlukan `aapt` dan verifikasi signature memerlukan `apksigner`.
 
-For other tools or missing packages, use their official projects and verify release checksums/signatures as provided:
+`setup --install` khusus sistem berbasis Debian/Ubuntu dan mengubah sistem: ia menjalankan `apt-get update`, mencoba memasang paket yang belum ditemukan, lalu memeriksa keberadaan executable. Tinjau sumber APT dan rencananya terlebih dahulu. Perintah ini memerlukan root atau sudo tanpa prompt password; kegagalan dilaporkan per paket. JADX, SDK lengkap, emulator, dan Ghidra tidak dipasang otomatis.
 
-- [Android SDK command-line tools and build tools](https://developer.android.com/studio#command-line-tools-only) (aapt, zipalign, apksigner, emulator, adb); configure `ANDROID_SDK_ROOT` and install required SDK components via official `sdkmanager`.
-- [JADX](https://github.com/skylot/jadx), [apktool](https://apktool.org/), [Eclipse Temurin Java](https://adoptium.net/), [Ghidra](https://github.com/NationalSecurityAgency/ghidra).
-- `readelf` from your OS toolchain is optional for native library headers and dynamic dependencies. `doctor` detects JADX/Ghidra but APKLab does not run them automatically; follow their documentation.
+Jika diperlukan, instal alat dari sumber resmi dan verifikasi checksum/signature yang disediakan:
 
-Availability varies by OS, SDK layout, and network. `setup` does not install JADX, Ghidra, the emulator or the complete SDK, and cannot configure a device or accept SDK licenses.
+- [Android SDK command-line tools dan build tools](https://developer.android.com/studio#command-line-tools-only): `aapt`, `zipalign`, `apksigner`, emulator, dan ADB.
+- [apktool](https://apktool.org/), [JADX](https://github.com/skylot/jadx), [Eclipse Temurin Java](https://adoptium.net/), dan [Ghidra](https://github.com/NationalSecurityAgency/ghidra).
+- `readelf` dari toolchain sistem bersifat opsional untuk pemeriksaan header dan dependensi native. APKLab mendeteksi JADX/Ghidra, tetapi belum menjalankannya secara otomatis.
 
-## Inspect and analyze
+Ketersediaan alat bergantung pada sistem dan jaringan. Pemasangan SDK, penerimaan lisensi SDK, dan konfigurasi perangkat tidak dilakukan otomatis.
+
+## Penggunaan
+
+Aktifkan virtual environment (`. .venv/bin/activate` pada Linux/macOS), atau ganti `apklab` dengan path lengkap ke executable di virtual environment.
+
+### Inspeksi APK dan split
 
 ```sh
 apklab inspect app.apk
 apklab inspect base.apk split_config.arm64_v8a.apk
 apklab inspect ./split-directory --recursive --report inspection.json
+apklab dex app.apk --search login --limit 50
+apklab inventory app.apk --search lib --native-details
+```
+
+`inspect` memeriksa CRC ZIP, direktori ABI native, dan keberadaan manifest. Dengan `aapt` dan `apksigner`, ia juga membaca metadata dan memverifikasi signature. Untuk beberapa APK, nama paket, kode versi, dan kumpulan digest sertifikat yang tersedia dibandingkan. Hasil yang tidak tersedia ditandai `not_tested`; kesamaan digest tidak membuktikan split lengkap atau kompatibel. Pemilihan base, dependensi split, kompatibilitas perangkat, rotasi signer, dan pemasangan belum divalidasi sepenuhnya.
+
+`dex` mengindeks kelas dan referensi metode, bukan perilaku runtime atau call graph. URL dan nama model adalah petunjuk, bukan bukti bahwa server aktif atau definisi model lengkap. Obfuscation, string terenkripsi, DEX dinamis, dan kode native dapat menyembunyikan informasi. `inventory` mendata path dan ukuran, bukan isi seluruh aset.
+
+### Inspeksi dan ekstraksi XAPK
+
+```sh
 apklab xapk inspect game.xapk --verify
 apklab xapk unpack game.xapk ./xapk-copy
 apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
-apklab inventory app.apk --search lib --native-details
-apklab dex app.apk --search 'login' --limit 50
-apklab dex app.apk --report dex-report.json
 ```
 
-- `inspect` checks ZIP CRCs, native ABI directory names, and AndroidManifest presence. It invokes **aapt** for package/version metadata and **apksigner verify** for signatures; unavailable tools are `not_tested`. Directories are searched one level by default, or recursively with `--recursive`. Known package names, version codes, and verified signer certificate SHA-256 digest sets are compared between supplied APKs; any unavailable comparison is `not_tested`. Matching digests are not proof of split compatibility, and differing digests are not a complete signing-rotation compatibility analysis. Base selection, missing splits, dependencies, device compatibility, and installation are **not** checked. `.apks` containers are not unpacked.
-- `xapk inspect` lists archive paths and sizes; `--verify` streams every file, checks ZIP CRC and reports SHA-256. `xapk unpack` copies entries into a **new** directory and checks CRC/hashes as it writes. It rejects traversal, duplicate/colliding paths, links, special files, encrypted entries, and size-limit violations. The source archive is only read, not modified. For an optional root `manifest.json` with a supported `split_apks` list, APK file references are compared with archive names; other manifest layouts are reported as untested. Manifest completeness, inner APK contents and OBB compatibility are not validated; inspect extracted APKs separately. A manifest warning or failure can be reported after extraction has completed, leaving the copied directory in place. Extracting consumes disk space and may take time. XAPK formats vary; repacking, installing, device-specific split selection and placing OBB files are not implemented.
-- `inventory` lists `assets/`, `res/`, and `lib/<abi>/*.so` paths and uncompressed sizes. `--search` filters paths, not content. `--native-details` invokes `readelf -h -d` if available, not full native reverse engineering.
-- `dex` indexes DEX class definitions, method ID references (including references not necessarily called), common API references, string literals and literal HTTP(S) URLs. Model names are a naming heuristic; they are **not** extracted schema definitions. `--search` filters results; `--limit` caps each returned list. Names may be obfuscated, strings encrypted, endpoints assembled dynamically, DEX loaded remotely, and code may reside in native libraries. This is not a decompiler or call graph. Use JADX/Ghidra separately when needed.
-- APK ZIP defaults: at most 100,000 entries, 64 MiB per entry and 512 MiB total uncompressed. Override the size limits explicitly with `--max-entry-mib` and `--max-total-mib` on `inspect`, `inventory`, and `dex` for larger trusted inputs. Larger limits can consume substantial memory (especially DEX/native analysis), CPU, and disk. XAPK defaults are 2,048 MiB per entry and 8,192 MiB total; the same options are available after `xapk inspect` or `xapk unpack`. CRC is not signature verification or a security guarantee. Other analysis commands do not extract files.
+`xapk inspect` mendata entri; `--verify` membaca setiap file, memeriksa CRC, dan menghitung SHA-256. `unpack` hanya membaca arsip asli dan menyalin isinya ke direktori **baru**, dengan pemeriksaan CRC dan hash. Path traversal, duplikat atau tabrakan path, symlink, file khusus, entri terenkripsi, dan pelanggaran batas ukuran ditolak.
 
-All command output is JSON with `verified`, `inferences`, `failures`, and `not_tested`. `verified` means the stated check happened, not that the app is safe or functional. Exit code 1 indicates a reported failure, 0 means no failures, **not** that every check was run. `--report FILE` writes a new report and refuses to overwrite an existing file; for `work` and `xapk`, place `--report` immediately after that command, before the subcommand. Reports may contain sensitive app strings, endpoints, and file paths: inspect/redact before sharing or committing.
+Referensi APK pada `manifest.json` root dengan daftar `split_apks` yang didukung dibandingkan dengan nama entri; format lain ditandai belum diuji. Pemeriksaan ini tidak memvalidasi kelengkapan manifest, isi APK secara menyeluruh, atau kompatibilitas OBB. Jika manifest menghasilkan kegagalan setelah ekstraksi, direktori hasil salinan dapat tetap ada. Penyusunan ulang XAPK, penempatan OBB, pemilihan split sesuai perangkat, dan pemasangan belum diimplementasikan.
 
-## Copy-based modification workflow
+Batas default APK adalah 100.000 entri, 64 MiB per entri, dan 512 MiB total tidak terkompresi. Untuk XAPK, batas ukuran default adalah 2.048 MiB per entri dan 8.192 MiB total. Sesuaikan secara sadar melalui `--max-entry-mib` dan `--max-total-mib`; batas lebih besar dapat memakai banyak memori, CPU, dan ruang disk. CRC bukan pengganti verifikasi signature. Kontainer `.apks` belum diekstrak secara otomatis.
+
+### Alur modifikasi berbasis salinan
 
 ```sh
 apklab work init app.apk ./apklab-work-example
 apklab work decode ./apklab-work-example
-# Edit only files under apklab-work-example/decoded, preserving the original input.
+# Edit hanya file dalam apklab-work-example/decoded.
 apklab work build ./apklab-work-example
 apklab work align ./apklab-work-example
-# Supply a keystore you control. Put the password in an environment variable
-# using a secure local method; do not put the value in commands, reports or Git.
 apklab work sign ./apklab-work-example --keystore /secure/path/key.jks --alias mykey --pass-env APKLAB_KS_PASS
 apklab inspect ./apklab-work-example/signed.apk
 ```
 
-The workspace must be new; `original.apk` is a copy. Stages use `apktool d`, `apktool b`, `zipalign -p 4`, and `apksigner sign` respectively. Each output must be new and inside the workspace. `--input` and `--output` override default paths but remain confined to that workspace. Tools must be installed first. Signing supports a keystore password passed by environment variable name; advanced key password, hardware token, signing configuration, and split-set rebuilding are not implemented. The resulting APK is not claimed installable, playable, correctly signed, compatible with original app data, or functional. Verify separately with `apksigner verify`, `zipalign -c -p 4`, and only with permission test on an isolated device/emulator. A different signing key can prevent updates and invalidate signature-dependent integrations. Some APKs cannot be rebuilt by apktool unchanged.
+Workspace harus baru; `original.apk` adalah salinan. Tahapan menggunakan `apktool`, `zipalign`, dan `apksigner` yang dipasang terpisah. Output harus baru dan berada di dalam workspace; `--input` dan `--output` dapat mengubah path dalam workspace. Masukkan password ke variabel lingkungan melalui cara lokal yang aman, bukan ke perintah, laporan, atau Git. Dukungan key password terpisah, hardware token, dan rebuild satu set split belum tersedia.
 
-## Server dependencies
+Verifikasi signature dan alignment secara terpisah, lalu uji pemasangan/fungsi hanya pada perangkat atau emulator terisolasi dengan izin. Kunci signing yang berbeda dapat mencegah pembaruan aplikasi asli atau memengaruhi integrasi. Tidak semua APK dapat direbuild dengan apktool tanpa perubahan.
 
-URLs, network API references, models, and native code can suggest server dependencies. They cannot reveal private server code/data, protocol semantics, authentication, operational availability, or guarantee compatibility. Record observations and hypotheses separately; do not contact production endpoints without authorization. Server behavior requires independent documentation and testing. APKLab does not generate a compatible game server.
+### Laporan
 
-## Tests and limitations
+Semua output berupa JSON. Exit code `1` menunjukkan kegagalan yang dilaporkan; `0` berarti tidak ada kegagalan, **bukan** semua pemeriksaan telah dijalankan. `--report FILE` hanya membuat file baru dan tidak menimpa file yang ada. Untuk `work` dan `xapk`, letakkan `--report` setelah nama perintah dan sebelum subperintah.
+
+Laporan dapat memuat string, endpoint, atau path sensitif. Tinjau dan samarkan sebelum membagikannya. Jangan memasukkan APK/XAPK, OBB, hasil ekstraksi, keystore, kredensial, atau data pribadi ke Git; `.gitignore` hanya bantuan, bukan jaminan.
+
+## Batasan server dan pengujian
+
+URL, referensi API, model, dan kode native dapat menunjukkan ketergantungan server, tetapi tidak menyediakan kode atau data server privat dan tidak membuktikan ketersediaan maupun kompatibilitasnya. APKLab tidak membuat server game yang kompatibel secara otomatis. Jangan menghubungi endpoint produksi tanpa izin.
+
+Jalankan tes otomatis dengan:
 
 ```sh
 python3 -m unittest discover -s tests -v
 ```
 
-Tests use synthetic APK/DEX files and mock external tools for metadata, signing and workflow stages; the native inspection test also uses the system `readelf` when available. A separate manual smoke test has indexed the public [Androguard TestActivity.apk](https://github.com/androguard/androguard/blob/master/tests/data/APK/TestActivity.apk); it is not included in this repo. Full real-tool decode/rebuild/align/sign and device/emulator tests require the relevant tools and authorized samples; they were not run in the initial environment. No app, private data, build artifacts, secrets or keystores belong in Git. The `.gitignore` is a safety aid, not a guarantee.
+Tes menggunakan APK/DEX sintetis dan mock untuk metadata, signing, serta alur alat eksternal; tes native juga menggunakan `readelf` sistem jika tersedia. Smoke test terpisah pernah menggunakan [APK uji publik Androguard](https://github.com/androguard/androguard/blob/master/tests/data/APK/TestActivity.apk), yang tidak disertakan di repo ini. Decode, rebuild, alignment, signing dengan alat nyata dan uji perangkat/emulator belum diuji menyeluruh di lingkungan awal.
+
+## Lisensi
+
+APKLab didistribusikan di bawah **MIT License**. Lisensi ini mengizinkan penggunaan, penyalinan, modifikasi, penggabungan, publikasi, distribusi, sublicensing, dan penjualan, dengan syarat pemberitahuan hak cipta dan lisensi disertakan dalam semua salinan atau bagian substansial perangkat lunak. Perangkat lunak disediakan **“sebagaimana adanya” tanpa jaminan**; ketentuan lengkap ada di [LICENSE](LICENSE).
+
+Lisensi APKLab tidak memberikan hak atas APK/XAPK, aset, data, atau alat pihak ketiga yang Anda analisis atau gunakan. Hak dan lisensi masing-masing tetap berlaku.
