@@ -292,7 +292,16 @@ def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
         else:
             add(r, "failures", str(path), "aapt: " + result["stderr"][:1000])
     else:
-        add(r, "not_tested", str(path), "Package/version: aapt not found; binary manifest was not decoded")
+        from .axml import read_manifest
+        try:
+            manifest = read_manifest(str(path))
+            item.update(package=manifest['package'], version_code=manifest['version_code'], version_name=manifest['version_name'])
+            item['manifest'] = manifest
+            item['metadata_source'] = 'internal_axml'
+            add(r, "inferences", str(path), "Selected literal metadata read by internal AXML parser; not aapt verification")
+            add(r, "not_tested", str(path), "aapt metadata and resource resolution unavailable; internal parser is partial")
+        except (ValueError, KeyError, OSError, zipfile.BadZipFile, RuntimeError) as exc:
+            add(r, "not_tested", str(path), "Package/version: aapt unavailable and internal AXML parser could not decode manifest: " + str(exc))
     signer = find_tool("apksigner")
     if signer:
         result = run([signer, "verify", "--verbose", "--print-certs", path])

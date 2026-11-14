@@ -45,6 +45,17 @@ def doctor(args):
             elif args.check:
                 add(r, 'not_tested', name, 'No safe version probe configured')
         else: add(r, 'not_tested', name, 'Not found. ' + NEXT[name])
+    features = {
+        'basic manifest literals (internal parser)': [], 'signature verification': ['apksigner'],
+        'aapt manifest metadata': ['aapt'], 'APK decode/build': ['apktool'],
+        'JADX decompilation': ['jadx'], 'ZIP alignment': ['zipalign'],
+        'signing': ['apksigner'], 'emulator install': ['adb', 'aapt', 'apksigner'],
+        'native symbols': ['readelf'],
+    }
+    r['feature_tools'] = [{'feature': name, 'required': required,
+                           'missing': [tool for tool in required if not r['tools'][tool]],
+                           'availability': 'missing tools' if any(not r['tools'][tool] for tool in required) else 'available (presence only)'}
+                          for name, required in features.items()]
     sdk = os.environ.get('ANDROID_SDK_ROOT') or os.environ.get('ANDROID_HOME')
     if not sdk and (Path.home() / 'Android/Sdk').is_dir(): sdk = str(Path.home() / 'Android/Sdk')
     r['android_sdk'] = sdk
@@ -120,17 +131,18 @@ def inspect(args, _report):
             if len(known) > 1:
                 add(r, 'failures', 'split set', 'Different ' + label + ' found')
             elif len(known) == 1 and all(values):
-                add(r, 'verified', 'split set', 'Matching ' + label + ' across all inspected APKs')
+                category = 'inferences' if field != 'signer_sha256' and any(a.get('metadata_source') == 'internal_axml' for a in r['apks']) else 'verified'
+                add(r, category, 'split set', 'Matching ' + label + ' across all inspected APKs')
             else:
                 add(r, 'not_tested', 'split set', 'Cannot compare ' + label + ' for every APK')
         split_names = [a.get('split') for a in r['apks'] if a.get('split')]
-        if all(a.get('package') for a in r['apks']):
+        if all(a.get('package') and 'split' in a for a in r['apks']):
             bases = [a['file'] for a in r['apks'] if a.get('split') is None]
             r['split_candidates'] = {'base': bases, 'named_splits': {a['file']: a['split'] for a in r['apks'] if a.get('split')}}
             add(r, 'inferences', 'base candidates', str(len(bases)) + ' APK(s) have no split name in aapt output; base identity and completeness require independent validation')
         if len(split_names) != len(set(split_names)):
             add(r, 'failures', 'split set', 'Duplicate non-empty split names found in aapt metadata')
-        if not all(a.get('package') for a in r['apks']):
+        if not all(a.get('package') and 'split' in a for a in r['apks']):
             add(r, 'not_tested', 'split names', 'Metadata unavailable for one or more APKs')
         add(r, 'not_tested', 'split set', 'Completeness, split dependencies, signer rotation compatibility and installation not verified')
     if args.device_abi:
@@ -306,7 +318,14 @@ def dex(args, _report):
                 add(r, 'failures', name, str(e))
     tool = find_tool('aapt')
     if not tool:
-        add(r, 'not_tested', 'manifest', 'aapt not found; manifest permissions and components not decoded')
+        from .axml import read_manifest
+        try:
+            r['manifest'] = read_manifest(args.apk)
+            r['manifest']['source'] = 'internal_axml'
+            add(r, 'inferences', 'manifest', 'Selected literal values read by internal AXML parser, not aapt verification')
+            add(r, 'not_tested', 'manifest completeness', 'Resource references and dynamically registered components are not resolved')
+        except (ValueError, KeyError, OSError, zipfile.BadZipFile, RuntimeError) as exc:
+            add(r, 'not_tested', 'manifest', 'aapt not found; internal AXML parser could not decode manifest: ' + str(exc))
     else:
         result = run([tool, 'dump', 'xmltree', args.apk, 'AndroidManifest.xml'], timeout=120)
         if result['returncode'] != 0:

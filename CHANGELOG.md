@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add bounded internal binary-AXML literal metadata fallback, a doctor feature/tool table, and broader setup-plan guidance.
+
 - Check duplicate ZIP entries individually, bound subprocess output, and make process cleanup best effort across POSIX and Windows.
 - Limit DEX index expansion, decode Modified UTF-8, and report unsupported or malformed inputs rather than silently replacing invalid text.
 - Validate APK ZIP structure consistently, report partial manifest output, and stage workspace and XAPK outputs before publication.
