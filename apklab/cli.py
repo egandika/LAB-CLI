@@ -1,3 +1,6 @@
+
+from __future__ import annotations
+from typing import Any, Optional
 import argparse
 import os
 import re
@@ -7,7 +10,7 @@ import zlib
 from pathlib import Path
 from . import __version__
 from .core import TOOLS, PartialReportError, add, emit, find_tool, inspect_one, reported, report, run, validate_apk_archive
-from .dex import read_dex
+from .dex import read_dex, UnsupportedDexContainer
 from .workflow import init, perform, workspace_input, supports_16k
 from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, repack as repack_xapk, repack_directory, manifest_info
 from .device import install_test
@@ -26,7 +29,7 @@ VERSION_ARGS = {
 }
 
 
-def doctor(args):
+def doctor(args: argparse.Namespace) -> dict:
     r = report()
     r['tools'] = {}
     if args.check: r['probes'] = {}
@@ -45,6 +48,17 @@ def doctor(args):
             elif args.check:
                 add(r, 'not_tested', name, 'No safe version probe configured')
         else: add(r, 'not_tested', name, 'Not found. ' + NEXT[name])
+    features = {
+        'basic manifest literals (internal parser)': [], 'signature verification': ['apksigner'],
+        'aapt manifest metadata': ['aapt'], 'APK decode/build': ['apktool'],
+        'JADX decompilation': ['jadx'], 'ZIP alignment': ['zipalign'],
+        'signing': ['apksigner'], 'emulator install': ['adb', 'aapt', 'apksigner'],
+        'native symbols': ['readelf'],
+    }
+    r['feature_tools'] = [{'feature': name, 'required': required,
+                           'missing': [tool for tool in required if not r['tools'][tool]],
+                           'availability': 'missing tools' if any(not r['tools'][tool] for tool in required) else 'available (presence only)'}
+                          for name, required in features.items()]
     sdk = os.environ.get('ANDROID_SDK_ROOT') or os.environ.get('ANDROID_HOME')
     if not sdk and (Path.home() / 'Android/Sdk').is_dir(): sdk = str(Path.home() / 'Android/Sdk')
     r['android_sdk'] = sdk
@@ -54,7 +68,7 @@ def doctor(args):
     return r
 
 
-def setup(args):
+def setup(args: argparse.Namespace) -> dict:
     r = report()
     packages = {'java': 'default-jre-headless', 'apktool': 'apktool', 'adb': 'adb', 'aapt': 'aapt', 'zipalign': 'zipalign', 'apksigner': 'apksigner'}
     r['plan'] = setup_guidance()
@@ -67,7 +81,11 @@ def setup(args):
         add(r, 'failures', 'setup', 'apt-get not available; install tools manually')
         return r
     prefix = []
-    if os.geteuid() != 0:
+    geteuid = getattr(os, 'geteuid', None)
+    if geteuid is None:
+        add(r, 'failures', 'setup', 'APT installation requires a supported POSIX host; use setup --plan for manual platform guidance')
+        return r
+    if geteuid() != 0:
         sudo = find_executable('sudo')
         if not sudo or run([sudo, '-n', 'true'])['returncode'] != 0:
             add(r, 'failures', 'setup', 'Root or passwordless sudo required; no password requested')
@@ -91,12 +109,12 @@ def setup(args):
     return r
 
 
-def find_executable(name):
+def find_executable(name: str) -> Optional[str]:
     import shutil
     return shutil.which(name)
 
 
-def apk_paths(inputs, recursive=False):
+def apk_paths(inputs: Any, recursive: bool=False) -> list:
     paths = []
     for name in inputs:
         p = Path(name)
@@ -108,7 +126,7 @@ def apk_paths(inputs, recursive=False):
 
 
 @reported
-def inspect(args, _report):
+def inspect(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['apks'] = []
     for p in apk_paths(args.apks, args.recursive):
@@ -120,19 +138,28 @@ def inspect(args, _report):
             if len(known) > 1:
                 add(r, 'failures', 'split set', 'Different ' + label + ' found')
             elif len(known) == 1 and all(values):
-                add(r, 'verified', 'split set', 'Matching ' + label + ' across all inspected APKs')
+                category = 'inferences' if field != 'signer_sha256' and any(a.get('metadata_source') == 'internal_axml' for a in r['apks']) else 'verified'
+                add(r, category, 'split set', 'Matching ' + label + ' across all inspected APKs')
             else:
                 add(r, 'not_tested', 'split set', 'Cannot compare ' + label + ' for every APK')
         split_names = [a.get('split') for a in r['apks'] if a.get('split')]
-        if all(a.get('package') for a in r['apks']):
+        if all(a.get('package') and 'split' in a for a in r['apks']):
             bases = [a['file'] for a in r['apks'] if a.get('split') is None]
             r['split_candidates'] = {'base': bases, 'named_splits': {a['file']: a['split'] for a in r['apks'] if a.get('split')}}
             add(r, 'inferences', 'base candidates', str(len(bases)) + ' APK(s) have no split name in aapt output; base identity and completeness require independent validation')
         if len(split_names) != len(set(split_names)):
             add(r, 'failures', 'split set', 'Duplicate non-empty split names found in aapt metadata')
-        if not all(a.get('package') for a in r['apks']):
+        if not all(a.get('package') and 'split' in a for a in r['apks']):
             add(r, 'not_tested', 'split names', 'Metadata unavailable for one or more APKs')
         add(r, 'not_tested', 'split set', 'Completeness, split dependencies, signer rotation compatibility and installation not verified')
+    observations = []
+    for item in r['apks']:
+        observations.append({'id': item['file'], 'apk': item, 'dependencies': read_dependencies(item['file'])})
+    r['split_observations'] = observations
+    r['split_analysis'] = assess_outputs(observations)
+    for issue in r['split_analysis']['issues']: add(r, 'failures', 'split set', issue)
+    for unknown in r['split_analysis']['unknown']:
+        add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
     if args.device_abi:
         present = sorted({abi for apk in r['apks'] for abi in apk['architectures']})
         r['abi_observation'] = {'requested': args.device_abi, 'native_directories': present}
@@ -147,7 +174,7 @@ def inspect(args, _report):
 
 
 @reported
-def xapk(args, _report):
+def xapk(args: argparse.Namespace, _report: Any) -> dict:
     from .publish import publish_new, staging
     r = _report
     entry, total = args.max_entry_mib * MIB, args.max_total_mib * MIB
@@ -197,9 +224,11 @@ def xapk(args, _report):
                 if not sep or not name or not replacement or name in replacements:
                     raise ValueError('Each --replace must be a unique ENTRY=FILE pair')
                 replacements[name] = replacement
-            entries = (repack_directory(args.archive, staged, replacements, entry, total)
-                       if args.directory else repack_xapk(args.archive, staged, replacements, entry, total))
+            entries = (repack_directory(args.archive, staged, replacements, entry, total, update_manifest=args.update_manifest)
+                       if args.directory else repack_xapk(args.archive, staged, replacements, entry, total, update_manifest=args.update_manifest))
             describe(entries, staged / 'repacked.xapk' if args.directory else staged)
+            if args.update_manifest:
+                add(r, 'verified', 'XAPK manifest', 'Updated size and SHA-256 fields for replaced APK entries in supported split_apks manifest')
             if r['failures']: return r
             publish_new(staged, destination, directory=args.directory)
             add(r, 'verified', 'XAPK', 'Copied validated ZIP entries to a new archive; replacement APK ZIP CRCs were checked')
@@ -211,7 +240,7 @@ def xapk(args, _report):
 
 
 @reported
-def inventory(args, _report):
+def inventory(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['files'] = []
     with zipfile.ZipFile(args.apk) as z:
@@ -281,7 +310,7 @@ def inventory(args, _report):
 
 
 @reported
-def dex(args, _report):
+def dex(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['dex_files'] = []
     with zipfile.ZipFile(args.apk) as z:
@@ -302,11 +331,21 @@ def dex(args, _report):
                 add(r, 'verified', name, 'Indexed DEX identifier tables and string literals, not code behavior; lists are capped')
                 r['dex_files'][-1]['obfuscation_candidates'] = candidates(classes, d['strings'], args.limit)
                 add(r, 'inferences', name, 'Model names, URLs, short class names and encoded-looking strings are hints, not proof of obfuscation, use or server availability')
+            except UnsupportedDexContainer as e:
+                r['dex_files'].append({'file': name, 'zip_entry_index': index, 'status': 'not_tested', 'reason': str(e)})
+                add(r, 'not_tested', name, str(e))
             except (ValueError, IndexError, zipfile.BadZipFile) as e:
                 add(r, 'failures', name, str(e))
     tool = find_tool('aapt')
     if not tool:
-        add(r, 'not_tested', 'manifest', 'aapt not found; manifest permissions and components not decoded')
+        from .axml import read_manifest
+        try:
+            r['manifest'] = read_manifest(args.apk)
+            r['manifest']['source'] = 'internal_axml'
+            add(r, 'inferences', 'manifest', 'Selected literal values read by internal AXML parser, not aapt verification')
+            add(r, 'not_tested', 'manifest completeness', 'Resource references and dynamically registered components are not resolved')
+        except (ValueError, KeyError, OSError, zipfile.BadZipFile, RuntimeError) as exc:
+            add(r, 'not_tested', 'manifest', 'aapt not found; internal AXML parser could not decode manifest: ' + str(exc))
     else:
         result = run([tool, 'dump', 'xmltree', args.apk, 'AndroidManifest.xml'], timeout=120)
         if result['returncode'] != 0:
@@ -335,7 +374,7 @@ def dex(args, _report):
 
 
 @reported
-def work(args, _report):
+def work(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     if args.stage == 'init':
         dest = init(args.apk, args.workspace)
@@ -361,7 +400,30 @@ def work(args, _report):
                 add(r, 'verified', label, 'ZIP verification command succeeded for ' + str(src))
             else:
                 add(r, 'failures', label, 'Verification command failed: ' + (result['stderr'] or result['stdout'])[:2000])
-        add(r, 'not_tested', 'runtime', 'Installability, ELF segment alignment, signature identity compatibility, and app behavior are not verified')
+        from .elf import load_alignment, UnsupportedElf
+        r['elf_16k'] = []
+        try:
+            with zipfile.ZipFile(src) as z:
+                infos = validate_apk_archive(src, z)
+                for index, info in enumerate(infos):
+                    if not (info.filename.startswith('lib/') and info.filename.endswith('.so') and not info.is_dir()): continue
+                    item = {'file': info.filename, 'zip_entry_index': index}
+                    r['elf_16k'].append(item)
+                    try:
+                        item.update(load_alignment(z.read(info)))
+                        if item['aligned_16k']:
+                            add(r, 'verified', info.filename, 'ELF LOAD p_align and offset/address congruence meet 16 KiB checks')
+                        else:
+                            add(r, 'failures', info.filename, 'ELF LOAD segment does not meet 16 KiB alignment checks')
+                    except UnsupportedElf as exc:
+                        item.update(status='not_tested', reason=str(exc))
+                        add(r, 'not_tested', info.filename, str(exc))
+                    except (ValueError, zipfile.BadZipFile) as exc:
+                        item.update(status='failure', reason=str(exc))
+                        add(r, 'failures', info.filename, 'ELF inspection: ' + str(exc))
+        except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+            add(r, 'failures', 'ELF inspection', 'Could not inspect APK libraries: ' + str(exc))
+        add(r, 'not_tested', 'runtime', 'Installability, ELF runtime compatibility, signature identity compatibility, and app behavior are not verified')
     else:
         dest, result = perform(args.stage, args.workspace, args.input, args.output_path,
                                getattr(args, 'keystore', None), getattr(args, 'alias', None), getattr(args, 'pass_env', None),
@@ -373,7 +435,7 @@ def work(args, _report):
     return r
 
 
-def jadx(args):
+def jadx(args: argparse.Namespace) -> dict:
     r = report()
     size, diagnostics = decompile(args.apk, args.output, args.timeout, args.max_output_mib * MIB, include_diagnostics=True)
     r['jadx_diagnostics'] = diagnostics
@@ -384,12 +446,12 @@ def jadx(args):
     return r
 
 
-def device(args):
+def device(args: argparse.Namespace) -> dict:
     return install_test(args.serial, args.apks, args.confirm_install, args.launch)
 
 
 @reported
-def splits(args, _report):
+def splits(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     if args.action == 'init':
         r['members'] = init_set(args.workspace, args.apks)
@@ -457,20 +519,22 @@ def splits(args, _report):
     return r
 
 
-def zip_limits(p):
+def zip_limits(p: argparse.ArgumentParser) -> None:
     p.add_argument('--max-entry-mib', type=int, default=64, help='Max uncompressed entry size in MiB (default 64)')
     p.add_argument('--max-total-mib', type=int, default=512, help='Max total uncompressed size in MiB (default 512)')
 
 
-def parser():
+def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog='apklab', description='APKLab: evidence-oriented APK analysis and copy-based workflows')
     p.add_argument('--summary', action='store_true', help='Print a human-readable summary above JSON')
+    p.add_argument('--redact', action='store_true', help='Best-effort redaction of sensitive report strings')
     p.add_argument('--version', action='version', version='%(prog)s ' + __version__)
     sub = p.add_subparsers(dest='command', required=True)
     def cmd(name, help, func):
         q = sub.add_parser(name, help=help, description=help)
         q.set_defaults(func=func)
         q.add_argument('--summary', action='store_true', default=argparse.SUPPRESS, help='Print a human-readable summary above JSON')
+        q.add_argument('--redact', action='store_true', default=argparse.SUPPRESS, help='Best-effort redaction of report strings')
         q.add_argument('--report', metavar='FILE', help='Write JSON report to a new file (never overwrite)')
         return q
     q = cmd('doctor', 'Find external Android and analysis tools', doctor)
@@ -489,11 +553,13 @@ def parser():
     for action in ('inspect', 'unpack', 'repack'):
         x = actions.add_parser(action, help=action + ' an XAPK archive')
         x.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+        x.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
         x.add_argument('archive')
         if action == 'unpack': x.add_argument('destination', help='New directory; parent must exist')
         elif action == 'repack':
             x.add_argument('destination', help='New output archive; parent must exist')
             x.add_argument('--directory', action='store_true', help='Create new directory with repacked.xapk and manifest-validated OBB layout')
+            x.add_argument('--update-manifest', action='store_true', help='Update size and sha256 in supported split_apks entries for replacements')
             x.add_argument('--replace', action='append', default=[], metavar='ENTRY=APK', help='Replace an existing APK entry; repeat as needed')
         else: x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
@@ -512,14 +578,16 @@ def parser():
     q = cmd('jadx', 'Decompile a copy of an APK into a new directory', jadx)
     q.add_argument('apk'); q.add_argument('output')
     q.add_argument('--timeout', type=int, default=600, help='Timeout in seconds (default 600)')
-    q.add_argument('--max-output-mib', type=int, default=512, help='Best-effort monitored output cap in MiB (default 512)')
+    q.add_argument('--max-output-mib', type=int, default=128, help='Best-effort monitored output cap in MiB (default 128)')
     q = cmd('splits', 'Copy-based multi-APK split workflows', splits)
     actions = q.add_subparsers(dest='action', required=True)
     i = actions.add_parser('init', help='Copy APKs into a new split workspace')
     i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('workspace'); i.add_argument('apks', nargs='+')
     s = actions.add_parser('run', help='Run a stage for each APK copy')
     s.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    s.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     s.add_argument('workspace'); s.add_argument('stage', choices=('decode', 'build', 'align', 'sign', 'verify'))
     s.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Select ZIP alignment for align; verify attempts both 4 and 16 KiB regardless')
     s.add_argument('--keystore'); s.add_argument('--alias'); s.add_argument('--pass-env')
@@ -530,14 +598,16 @@ def parser():
     q.add_argument('apks', nargs='+', help='APK files to copy and install, including base and all needed splits')
     q = cmd('work', 'Copy-based decode/JADX/build/align/sign/verify workflow', work)
     stages = q.add_subparsers(dest='stage', required=True)
-    i = stages.add_parser('init', help='Copy APK to a new workspace'); i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS); i.add_argument('apk'); i.add_argument('workspace')
+    i = stages.add_parser('init', help='Copy APK to a new workspace'); i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS); i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS); i.add_argument('apk'); i.add_argument('workspace')
     v = stages.add_parser('verify', help='Check alignment and signature of an APK in the workspace')
     v.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    v.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     v.add_argument('workspace'); v.add_argument('--input', help='APK inside workspace (default signed.apk)')
     v.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Compatibility option only: verify attempts both 4 and 16 KiB ZIP alignment checks regardless')
     for stage in ('decode', 'jadx', 'build', 'align', 'sign'):
         s = stages.add_parser(stage, help=stage + ' within an APKLab workspace')
         s.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+        s.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
         s.add_argument('workspace'); s.add_argument('--input', help='Input path inside workspace')
         s.add_argument('--output', dest='output_path', help='New output path inside workspace')
         if stage == 'align': s.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Native library ZIP alignment in KiB (default 4)')
@@ -547,7 +617,7 @@ def parser():
     return p
 
 
-def main(argv=None):
+def main(argv: Any=None) -> int:
     args = parser().parse_args(argv)
     try:
         if getattr(args, 'limit', 1) < 1: raise ValueError('--limit must be positive')
@@ -556,11 +626,17 @@ def main(argv=None):
         r = e.report; add(r, 'failures', args.command, str(e))
     except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError, EOFError, zlib.error) as e:
         r = report(); add(r, 'failures', args.command, str(e))
+    if args.command == 'device':
+        r.setdefault('warnings', []).append('Installing or launching untrusted APKs can execute code and alter device state; use an isolated disposable emulator.')
+    elif args.command == 'setup' and args.install:
+        r.setdefault('warnings', []).append('Installing packages executes external code and modifies the system; review sources and use isolation.')
+    elif args.command in ('jadx', 'work', 'splits', 'inventory', 'inspect', 'dex'):
+        r.setdefault('warnings', []).append('External tools may process untrusted input; process cleanup and output limits are not a sandbox.')
     try:
-        emit(r, args.report, args.summary)
+        emit(r, args.report, args.summary, args.redact)
     except OSError as e:
         add(r, 'failures', 'report', 'Cannot write report: ' + str(e))
-        emit(r, summary=args.summary)
+        emit(r, summary=args.summary, redact=args.redact)
     return 1 if r['failures'] else 3 if r['not_tested'] else 0
 
 if __name__ == '__main__':

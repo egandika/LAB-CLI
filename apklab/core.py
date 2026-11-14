@@ -1,4 +1,8 @@
 """Core helpers. APKs and their contents are untrusted input."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 import json
 import contextlib
 import functools
@@ -48,7 +52,7 @@ def _executable_names(item):
     return [item + ext for ext in ('.exe', '.bat', '.cmd')] + [item]
 
 
-def find_tool(name):
+def find_tool(name: str) -> Optional[str]:
     names = TOOLS[name]
     # Explicit PATH choices take precedence over SDK fallback.
     for item in names:
@@ -87,7 +91,7 @@ def _validate_windows_batch_args(args):
             raise OSError('Unsafe Windows batch argument; shell metacharacters are not supported')
 
 
-def run(args, timeout=120, monitor=None):
+def run(args: Any, timeout: int=120, monitor: Any=None) -> dict:
     """Run a process with bounded capture and best-effort process-tree cleanup.
 
     monitor, when supplied, is called during execution and after termination;
@@ -136,7 +140,7 @@ def run(args, timeout=120, monitor=None):
             if time.monotonic() >= deadline:
                 timed_out = True
                 break
-            time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+            time.sleep(min(0.01 if monitor else 0.05, max(0, deadline - time.monotonic())))
     except OSError as exc:
         error = str(exc)
     finally:
@@ -168,7 +172,7 @@ def run(args, timeout=120, monitor=None):
     return result
 
 
-def report():
+def report() -> dict:
     return {"verified": [], "inferences": [], "failures": [], "not_tested": []}
 
 
@@ -181,14 +185,14 @@ class PartialReportError(Exception):
 
 
 @contextlib.contextmanager
-def preserve_report(partial_report):
+def preserve_report(partial_report: Any) -> Any:
     try:
         yield
     except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError, EOFError, zlib.error) as exc:
         raise PartialReportError(partial_report, exc) from exc
 
 
-def reported(func):
+def reported(func: Any) -> Any:
     """Preserve report entries when a command fails after recording progress."""
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -198,11 +202,38 @@ def reported(func):
     return wrapper
 
 
-def add(r, category, subject, detail):
+def add(r: Any, category: str, subject: str, detail: str) -> None:
     r[category].append({"subject": subject, "detail": detail})
 
 
-def emit(r, output=None, summary=False):
+def redact_report(value: Any) -> Any:
+    """Best-effort recursive report redaction, not a security guarantee."""
+    sensitive_key = re.compile(r'(?i)(?:password|passwd|secret|token|api[_-]?key|authorization|credential)')
+    def clean(text):
+        home = str(Path.home())
+        if len(home) > 2:
+            text = re.sub(re.escape(home), '[HOME]', text, flags=re.IGNORECASE if _windows() else 0)
+        text = re.sub(r'(?i)\b[A-Z]:[\\/]Users[\\/][^\\/\s"\']+', '[HOME]', text)
+        text = re.sub(r'(?i)\b(?:https?|wss?|ftp)://[^\s<>"\']+', '[URL]', text)
+        text = re.sub(r'(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+', r'\1[REDACTED]', text)
+        text = re.sub(r'(?i)\b(password|passwd|secret|token|api[_-]?key|authorization|credential)(\s*[:=]\s*)([^\s,;]+)', r'\1\2[REDACTED]', text)
+        return re.sub(r'(?<![A-Za-z0-9])[A-Za-z0-9_+/=-]{32,}(?![A-Za-z0-9])', '[REDACTED]', text)
+    if isinstance(value, str): return clean(value)
+    if isinstance(value, list): return [redact_report(item) for item in value]
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            safe_key = clean(key) if isinstance(key, str) else key
+            base = safe_key; n = 2
+            while safe_key in result:
+                safe_key = str(base) + ' #' + str(n); n += 1
+            result[safe_key] = '[REDACTED]' if isinstance(key, str) and sensitive_key.search(key) else redact_report(item)
+        return result
+    return value
+
+
+def emit(r: Any, output: Optional[Union[str, PathLike]]=None, summary: bool=False, redact: bool=False) -> None:
+    if redact: r = redact_report(r)
     # Escape isolated UTF-16 surrogates that valid DEX MUTF-8 can contain.
     text = json.dumps(r, indent=2, ensure_ascii=False).encode('utf-8', 'backslashreplace').decode('utf-8')
     if output:
@@ -220,7 +251,7 @@ def emit(r, output=None, summary=False):
     print(text)
 
 
-def zip_infos(z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
+def zip_infos(z: Any, max_entry: int=MAX_ENTRY, max_total: int=MAX_TOTAL) -> list:
     if max_entry < 1 or max_total < 1:
         raise ValueError('ZIP size limits must be positive')
     infos = z.infolist()
@@ -231,7 +262,7 @@ def zip_infos(z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     return infos
 
 
-def check_zip_crc(z, infos):
+def check_zip_crc(z: Any, infos: Any) -> Optional[str]:
     """Read each central-directory entry by identity, including duplicate names."""
     for info in infos:
         if info.is_dir():
@@ -245,7 +276,7 @@ def check_zip_crc(z, infos):
     return None
 
 
-def validate_apk_archive(path, z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
+def validate_apk_archive(path: Union[str, PathLike], z: Any, max_entry: int=MAX_ENTRY, max_total: int=MAX_TOTAL) -> list:
     """Validate basic APK ZIP structure and CRCs, not signatures or manifest contents."""
     if Path(path).suffix.lower() == '.xapk':
         raise ValueError('XAPK is an archive, not an APK; use apklab xapk inspect or unpack')
@@ -258,7 +289,7 @@ def validate_apk_archive(path, z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     return infos
 
 
-def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
+def inspect_one(path: Union[str, PathLike], r: Any, max_entry: int=MAX_ENTRY, max_total: int=MAX_TOTAL) -> dict:
     path = Path(path)
     item = {"file": str(path), "package": None, "version_name": None, "version_code": None, "architectures": [], "signer_sha256": None}
     if path.suffix.lower() == '.xapk':
@@ -292,7 +323,16 @@ def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
         else:
             add(r, "failures", str(path), "aapt: " + result["stderr"][:1000])
     else:
-        add(r, "not_tested", str(path), "Package/version: aapt not found; binary manifest was not decoded")
+        from .axml import read_manifest
+        try:
+            manifest = read_manifest(str(path))
+            item.update(package=manifest['package'], version_code=manifest['version_code'], version_name=manifest['version_name'])
+            item['manifest'] = manifest
+            item['metadata_source'] = 'internal_axml'
+            add(r, "inferences", str(path), "Selected literal metadata read by internal AXML parser; not aapt verification")
+            add(r, "not_tested", str(path), "aapt metadata and resource resolution unavailable; internal parser is partial")
+        except (ValueError, KeyError, OSError, zipfile.BadZipFile, RuntimeError) as exc:
+            add(r, "not_tested", str(path), "Package/version: aapt unavailable and internal AXML parser could not decode manifest: " + str(exc))
     signer = find_tool("apksigner")
     if signer:
         result = run([signer, "verify", "--verbose", "--print-certs", path])

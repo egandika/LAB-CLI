@@ -1,5 +1,8 @@
 """Non-executing, cross-platform tool setup guidance."""
 
+from __future__ import annotations
+from typing import Any, Optional
+
 SOURCES = {
     'apktool': ('https://apktool.org/docs/install/', 'Download the official wrapper and versioned JAR; compare the JAR SHA-256 with an upstream published digest when available.'),
     'build-tools': ('https://developer.android.com/studio#command-line-tools-only', 'Download SDK command-line tools for your OS and compare SHA-256 against the digest on the download page; use sdkmanager to install build-tools and platform-tools.'),
@@ -20,13 +23,15 @@ NEXT = {
 }
 
 
-def plan():
+def plan() -> dict:
     return {
         'sources': {k: {'url': url, 'instructions': instructions} for k, (url, instructions) in SOURCES.items()},
         'checksum': 'For SHA-256, compare sha256sum FILE (Linux/Termux) or shasum -a 256 FILE (macOS) to a digest obtained independently from the official release page. If no digest/signature is published, integrity is not verified.',
         'platforms': {
             'debian_ubuntu': 'Review APT sources and package versions; optional apklab setup --install uses APT only.',
             'termux_android': 'Review Termux packages with pkg search; pkg install openjdk binutils where available. Android SDK desktop binaries and emulator may not run on Android/Termux; use a supported host or compatible builds and verify separately.',
+            'other_linux': 'For Fedora, Arch, and other distributions, inspect the distribution package manager and trusted repositories; package names vary. Official upstream archives are an alternative; no installation is performed by this plan.',
+            'windows': 'Review the official Windows JDK, Android SDK and tool archives; verify upstream digests and configure PATH manually.',
             'macos': 'Use official macOS archives above or review Homebrew packages (brew search apktool jadx); verify package provenance. Install SDK command-line tools for macOS.',
         },
         'sdk_commands': ['sdkmanager --list', 'sdkmanager "platform-tools" "build-tools;35.0.0"'],

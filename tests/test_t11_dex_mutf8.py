@@ -48,7 +48,7 @@ class DexMutf8Tests(unittest.TestCase):
             read_dex(one_string(b'\x01' + valid[1:]))
 
     def test_unsupported_version_and_invalid_table_offsets(self):
-        for version in (b'000', b'036', b'041', b'999'):
+        for version in (b'000', b'036', b'999'):
             data = bytearray(tiny_dex()); data[4:7] = version
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'unsupported'):
                 read_dex(data)

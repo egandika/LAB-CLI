@@ -2,6 +2,14 @@
 
 ## 0.5.0 (unreleased)
 
+- Expand the CI Python matrix to 3.9–3.13 and annotate public module functions.
+- Fail safely when APT installation is requested on hosts without POSIX user IDs; compare resolved paths in portable staging tests. Windows behavior remains unverified natively.
+- Lower and sample JADX output caps more frequently (best effort), add optional report redaction, and warn about untrusted execution.
+- Check ELF LOAD segment alignment per native library during workspace verification, independently of ZIP alignment.
+- Inspect explicit split dependencies and optionally update supported XAPK manifest size/SHA-256 fields for replacements.
+- Report recognizable DEX 041 containers as not tested per entry and reject malformed container headers; cache repeated string offsets.
+- Add bounded internal binary-AXML literal metadata fallback, a doctor feature/tool table, and broader setup-plan guidance.
+
 - Check duplicate ZIP entries individually, bound subprocess output, and make process cleanup best effort across POSIX and Windows.
 - Limit DEX index expansion, decode Modified UTF-8, and report unsupported or malformed inputs rather than silently replacing invalid text.
 - Validate APK ZIP structure consistently, report partial manifest output, and stage workspace and XAPK outputs before publication.
@@ -10,7 +18,7 @@
 - Improve SDK tool discovery, ZIP ignore patterns, and synthetic regression coverage.
 - Pin GitHub Actions to full commit hashes; runtime downloads remain separate dependencies.
 
-These checks do not prove APK installability, ELF segment alignment, split completeness, or runtime behavior. Process cleanup is not a sandbox. The Android-tool and split integration paths require independent real-tool testing.
+These checks do not prove APK installability, full ELF validity or compatibility, split completeness, or runtime behavior. Process cleanup is not a sandbox. The Android-tool and split integration paths require independent real-tool testing.
 
 ## 0.4.0
 

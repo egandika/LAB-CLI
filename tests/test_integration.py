@@ -13,6 +13,7 @@ from pathlib import Path
 
 from apklab.cli import main
 from apklab.core import find_tool
+from apklab.elf import load_alignment
 
 
 @unittest.skipUnless(os.environ.get('APKLAB_INTEGRATION_APK'), 'set APKLAB_INTEGRATION_APK to run real Android-tool tests')
@@ -135,7 +136,8 @@ class AndroidToolIntegration(unittest.TestCase):
                 finally:
                     if old_password is None: os.environ.pop('APKLAB_TEST_KEY_PASSWORD', None)
                     else: os.environ['APKLAB_TEST_KEY_PASSWORD'] = old_password
-                verification16 = self.cli('work', 'verify', str(work), '--input', 'signed16.apk', '--page-size', '16')
+                verification16 = self.cli('work', 'verify', str(work), '--input', 'signed16.apk', '--page-size', '16', expected=3 if load_alignment(Path('/bin/true').read_bytes())['aligned_16k'] else 1)
+                self.assertEqual(verification16['elf_16k'][0]['aligned_16k'], load_alignment(Path('/bin/true').read_bytes())['aligned_16k'])
                 self.assertEqual(set(verification16['checks']), {'zipalign', 'zipalign_16k', 'apksigner'})
             if os.environ.get('APKLAB_TEST_SPLITS') == '1':
                 base, split = self.create_split_fixture(root, key)

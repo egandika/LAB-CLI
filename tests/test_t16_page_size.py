@@ -15,7 +15,7 @@ class PageSizeContractTests(unittest.TestCase):
             root = Path(tmp); apk = root/'source.apk'; workspace = root/'work'
             with zipfile.ZipFile(apk, 'w') as z: z.writestr('AndroidManifest.xml', 'fixture')
             with contextlib.redirect_stdout(io.StringIO()): self.assertEqual(main(['work', 'init', str(apk), str(workspace)]), 0)
-            (workspace/'signed.apk').write_bytes(b'fixture')
+            (workspace/'signed.apk').write_bytes(apk.read_bytes())
             for page in ('4', '16'):
                 calls = []
                 def fake(args, timeout=120):

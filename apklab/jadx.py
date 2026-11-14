@@ -1,4 +1,8 @@
 """Bounded best-effort JADX execution on an input copy."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 import os
 import shutil
 import tempfile
@@ -7,19 +11,23 @@ from .core import find_tool, run
 from .publish import publish_new, staging
 
 
-def directory_size(root):
+def directory_size(root: Union[str, PathLike], max_bytes: Optional[int]=None) -> int:
     size = 0
+    count = 0
     for base, dirs, files in os.walk(root, followlinks=False):
         if any((Path(base) / d).is_symlink() for d in dirs):
             raise ValueError('JADX output contains a symlink')
         for name in files:
+            count += 1
+            if count > 100000: raise ValueError('JADX output file count exceeded limit')
             path = Path(base) / name
             if path.is_symlink() or not path.is_file(): raise ValueError('JADX output contains a non-regular file')
             size += path.stat().st_size
+            if max_bytes is not None and size > max_bytes: return size
     return size
 
 
-def decompile(apk, destination, timeout, max_bytes, *, include_diagnostics=False):
+def decompile(apk: Union[str, PathLike], destination: Union[str, PathLike], timeout: int, max_bytes: int, *, include_diagnostics: bool=False) -> Any:
     if timeout < 1 or max_bytes < 1: raise ValueError('Timeout and size limit must be positive')
     tool = find_tool('jadx')
     if not tool: raise ValueError('jadx not found; run apklab doctor')
@@ -33,7 +41,7 @@ def decompile(apk, destination, timeout, max_bytes, *, include_diagnostics=False
             copied = Path(tmp) / 'input.apk'
             shutil.copyfile(source, copied)
             def monitor():
-                if directory_size(staged) > max_bytes: raise RuntimeError('JADX output exceeded size limit')
+                if directory_size(staged, max_bytes) > max_bytes: raise RuntimeError('JADX output exceeded size limit')
             result = run([tool, '--no-res', '-d', str(staged.resolve()), str(copied)], timeout=timeout, monitor=monitor)
             if result['returncode'] != 0:
                 using_stderr = bool(result['stderr'])

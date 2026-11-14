@@ -70,5 +70,5 @@ class WorkStagingTests(unittest.TestCase):
             return {'returncode':0, 'stdout':'', 'stderr':''}
         with patch('apklab.workflow.find_tool', return_value='/tool'), patch('apklab.workflow.run', side_effect=fake):
             result, _ = perform('decode', self.work, output='retried')
-        self.assertEqual(Path(result), dest); self.assertEqual((dest/'result').read_text(), 'data')
+        self.assertEqual(Path(result).resolve(), dest.resolve()); self.assertEqual((dest/'result').read_text(), 'data')
         self.assertEqual(list(self.work.glob('.apklab-stage-*')), [])
