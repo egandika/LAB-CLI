@@ -85,7 +85,7 @@ If needed, install tools from official sources and verify provided checksums/sig
 
 - [Android SDK command-line tools and build tools](https://developer.android.com/studio#command-line-tools-only): `aapt`, `zipalign`, `apksigner`, emulator, and ADB.
 - [apktool](https://apktool.org/), [JADX](https://github.com/skylot/jadx), [Eclipse Temurin Java](https://adoptium.net/), and [Ghidra](https://github.com/NationalSecurityAgency/ghidra).
-- `readelf` from the system toolchain is optional for native headers and dependencies. APKLab detects JADX/Ghidra but does not run them automatically.
+- `readelf` from the system toolchain is optional for native headers and dependencies. APKLab runs JADX only when explicitly requested with `work jadx`; it detects Ghidra but does not invoke it.
 
 Tool availability depends on the system and network. SDK installation, acceptance of SDK licenses, and device configuration are not automated.
 
