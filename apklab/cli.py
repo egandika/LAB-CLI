@@ -342,6 +342,7 @@ def work(args, _report):
     elif args.stage == 'verify':
         src = workspace_input(args.workspace, args.input or 'signed.apk')
         r['checks'] = {}
+        r['page_size_policy'] = 'Both 4 KiB and, when supported, 16 KiB ZIP checks are attempted; --page-size does not select verification checks'
         checks = [('zipalign', 'zipalign', ['-c', '-p', '4']),
                   ('zipalign_16k', 'zipalign', ['-c', '-P', '16', '4']),
                   ('apksigner', 'apksigner', ['verify', '--verbose', '--print-certs'])]
@@ -491,7 +492,7 @@ def parser():
     s = actions.add_parser('run', help='Run a stage for each APK copy')
     s.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
     s.add_argument('workspace'); s.add_argument('stage', choices=('decode', 'build', 'align', 'sign', 'verify'))
-    s.add_argument('--page-size', type=int, choices=(4, 16), default=4)
+    s.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Select ZIP alignment for align; verify attempts both 4 and 16 KiB regardless')
     s.add_argument('--keystore'); s.add_argument('--alias'); s.add_argument('--pass-env')
     q = cmd('device', 'Opt-in installation test on a disposable emulator', device)
     q.add_argument('--serial', required=True, help='Explicit emulator-NNNN serial (physical devices refused)')
@@ -504,7 +505,7 @@ def parser():
     v = stages.add_parser('verify', help='Check alignment and signature of an APK in the workspace')
     v.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
     v.add_argument('workspace'); v.add_argument('--input', help='APK inside workspace (default signed.apk)')
-    v.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Native library ZIP alignment in KiB (default 4)')
+    v.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Compatibility option only: verify attempts both 4 and 16 KiB ZIP alignment checks regardless')
     for stage in ('decode', 'jadx', 'build', 'align', 'sign'):
         s = stages.add_parser(stage, help=stage + ' within an APKLab workspace')
         s.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
