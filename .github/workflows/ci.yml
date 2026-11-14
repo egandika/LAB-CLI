@@ -101,6 +101,7 @@ jobs:
         env:
           APKLAB_INTEGRATION_APK: ${{ runner.temp }}/apklab-test.apk
           APKLAB_EMULATOR_SERIAL: emulator-5554
+          APKLAB_TEST_SPLITS: '1'
         with:
           api-level: 30
           target: default

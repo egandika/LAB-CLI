@@ -152,7 +152,11 @@ class AndroidToolIntegration(unittest.TestCase):
                 finally:
                     if old_password is None: os.environ.pop('APKLAB_TEST_KEY_PASSWORD', None)
                     else: os.environ['APKLAB_TEST_KEY_PASSWORD'] = old_password
-                self.cli('splits', 'run', str(splitset), 'verify')
+                verified_set = self.cli('splits', 'run', str(splitset), 'verify')
+                self.assertEqual(len(verified_set['members']), 2)
+                self.assertFalse(verified_set['split_analysis']['issues'])
+                self.assertFalse(verified_set['split_analysis']['unknown'])
+                self.assertTrue(all(member['inspection']['apk']['signer_sha256'] for member in verified_set['members']))
                 inspected = self.cli('inspect', str(splitset/'apk-0000/signed.apk'), str(splitset/'apk-0001/signed.apk'))
                 self.assert_split_identity(inspected)
                 self.assertEqual(input_digests, [hashlib.sha256(p.read_bytes()).hexdigest() for p in (base, split)])
@@ -163,6 +167,12 @@ class AndroidToolIntegration(unittest.TestCase):
                 self.cli('xapk', 'unpack', str(repacked), str(extracted))
                 self.assertEqual((extracted/'base.apk').read_bytes(), (work/'signed.apk').read_bytes())
                 self.assertEqual((extracted/'Android/obb/example/test.obb').read_bytes(), b'test-obb')
+                serial = os.environ.get('APKLAB_EMULATOR_SERIAL')
+                if serial:
+                    split_device = self.cli('device', '--serial', serial, '--confirm-install',
+                        str(splitset/'apk-0000/signed.apk'), str(splitset/'apk-0001/signed.apk'))
+                    self.assertIn('Success', split_device['install']['stdout'])
+                    self.assertTrue(any(x['subject'] == 'runtime' for x in split_device['not_tested']))
             serial = os.environ.get('APKLAB_EMULATOR_SERIAL')
             if serial:
                 device = self.cli('device', '--serial', serial, '--confirm-install', '--launch', str(work / 'signed.apk'))

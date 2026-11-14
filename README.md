@@ -163,7 +163,7 @@ Test installation and behavior only on an authorized, isolated device or emulato
 
 ### Split workspaces
 
-Create a new workspace from APK files, then run the same stage on each copy. This does not automatically select splits or validate the set:
+Create a new workspace from APK files, then run the same stage on each copy. This does not automatically select splits or establish set completeness:
 
 ```sh
 apklab splits init ./split-work base.apk split_config.arm64_v8a.apk
@@ -176,7 +176,7 @@ apklab splits run ./split-work verify --page-size 16
 apklab inspect ./split-work/apk-0000/signed.apk ./split-work/apk-0001/signed.apk
 ```
 
-Every signing operation uses the supplied keystore and alias; independently compare verified signer digests with `inspect`. Original-copy SHA-256 values are checked before each stage. Stages may partially succeed: read each member report. Existing outputs are never overwritten; use a new workspace or handle failed members individually. Set completeness, installer compatibility, device targeting, and behavior are not guaranteed.
+`splits run verify` independently inspects each signed output with `aapt` and `apksigner`, records signer digests and selected manifest declarations (`uses-split`, `configForSplit`, `isFeatureSplit`, `isSplitRequired`, and `versionCodeMajor`), and reports known signer, package, version and dependency contradictions. Missing or truncated metadata is marked untested, not treated as proof of completeness. Every signing operation uses the supplied keystore and alias; original-copy SHA-256 values are checked before each stage. Stages may partially succeed: read each member report. Existing outputs are never overwritten; use a new workspace or handle failed members individually. Set completeness, installer compatibility, device targeting, and behavior are not guaranteed.
 
 ### Disposable-emulator test
 
@@ -187,7 +187,7 @@ apklab device --serial emulator-5554 --confirm-install ./apklab-work-example/sig
 # Add --launch only when you intend to execute app code.
 ```
 
-For split sets, supply the base and all required split APK paths. The command requires `adb`, `aapt`, and `apksigner`; checks emulator identity, package/version/signer consistency, and refuses an already installed package. It does not install OBBs, select splits, uninstall the app, or prove app functionality. A launcher event is not proof of successful execution. Failure may leave a partially changed emulator; discard the disposable emulator when finished.
+For split sets, supply the base and all required split APK paths. The command requires `adb`, `aapt`, and `apksigner`; checks emulator identity, package/version/signer consistency and observed split dependencies, and refuses an already installed package. A known missing dependency blocks installation; unavailable or incomplete dependency metadata is reported as untested and does not establish completeness. It does not install OBBs, select splits, uninstall the app, or prove app functionality. A launcher event is not proof of successful execution. Failure may leave a partially changed emulator; discard the disposable emulator when finished.
 
 ### Reports
 
@@ -221,7 +221,7 @@ Most tests use synthetic APK/DEX files and mocks for metadata, signing, and exte
 APKLAB_INTEGRATION_APK=/path/to/authorized-test.apk python3 -m unittest discover -s tests -p test_integration.py -v
 ```
 
-Without `APKLAB_INTEGRATION_APK`, this test is skipped. When enabled, missing required tools cause failure. Set `APKLAB_TEST_16K=1`, `APKLAB_TEST_JADX=1`, or `APKLAB_TEST_SPLITS=1` to opt into the corresponding checks. The split option requires `ANDROID_HOME` with an installed platform `android.jar`; it generates and signs separate synthetic base and `config.en` APKs, checks their reported identities and runs the split workflow. This does not establish that the split set installs or works on a device. `APKLAB_EMULATOR_SERIAL=emulator-5554` additionally installs and launches the test APK on that emulator. Only use a disposable, isolated emulator.
+Without `APKLAB_INTEGRATION_APK`, this test is skipped. When enabled, missing required tools cause failure. Set `APKLAB_TEST_16K=1`, `APKLAB_TEST_JADX=1`, or `APKLAB_TEST_SPLITS=1` to opt into the corresponding checks. The split option requires `ANDROID_HOME` with an installed platform `android.jar`; it generates and signs separate synthetic base and `config.en` APKs, checks their reported identities and runs the split workflow. This does not establish that the split set installs or works on a device. `APKLAB_EMULATOR_SERIAL=emulator-5554` additionally installs and launches the test APK on that emulator. When both this option and `APKLAB_TEST_SPLITS=1` are set, the test also attempts `install-multiple` for the generated signed split set without launching it. Only use a disposable, isolated emulator.
 
 GitHub Actions is configured for cross-platform unit tests, real Android tools, and a disposable-emulator test using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. An earlier CI run exercised JADX, a 16 KiB ZIP-aligned native entry, a two-copy workflow, XAPK repacking, and installation and a launcher event on an API 30 emulator. The split integration fixture has since changed; consult the current workflow results before claiming the updated fixture passed. installing or launching a sample does not prove that another APK or game will work.
 

@@ -15,6 +15,7 @@ from .splits import init_set, read_set
 from .setup_plan import plan as setup_guidance, NEXT
 from .jadx import decompile
 from .analysis import parse_xmltree, candidates, magic_type
+from .split_metadata import assess_outputs, read_dependencies
 
 
 VERSION_ARGS = {
@@ -399,6 +400,7 @@ def splits(args, _report):
     if args.stage == 'sign' and not (args.keystore and args.alias and args.pass_env):
         raise ValueError('sign requires --keystore, --alias and --pass-env')
     r['members'] = []
+    observations = []
     for item in members:
         folder = root / item['id']
         result = {'id': item['id'], 'source_name': item.get('source_name')}
@@ -424,8 +426,34 @@ def splits(args, _report):
         except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as e:
             result['error'] = str(e)
             add(r, 'failures', item['id'], str(e))
+        if args.stage == 'verify':
+            observed = {'id': item['id']}
+            try:
+                signed = workspace_input(str(folder), 'signed.apk')
+                details = report()
+                observed['apk'] = inspect_one(signed, details)
+                observed['report'] = details
+                if details['failures']:
+                    add(r, 'failures', item['id'], 'Signed output inspection failed; see member inspection report')
+                if details['not_tested']:
+                    add(r, 'not_tested', item['id'], 'Signed output inspection has unavailable checks')
+                if observed['apk'].get('signer_sha256'):
+                    add(r, 'verified', item['id'], 'Signer certificate digest set read from verified signed output')
+                observed['dependencies'] = read_dependencies(signed)
+                if observed['dependencies']['status'] != 'observed':
+                    add(r, 'not_tested', item['id'], 'Split dependency metadata is unavailable or partial')
+            except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+                observed['error'] = str(exc)
+                add(r, 'not_tested', item['id'], 'Could not inspect signed output: ' + str(exc))
+            result['inspection'] = observed
+            observations.append(observed)
         r['members'].append(result)
-    add(r, 'not_tested', 'split set', 'Operations may partially succeed; completeness, matching signer digests, installability and runtime behavior are not verified')
+    if args.stage == 'verify':
+        analysis = assess_outputs(observations)
+        r['split_analysis'] = analysis
+        for issue in analysis['issues']: add(r, 'failures', 'split set', issue)
+        for unknown in analysis['unknown']: add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every output')
+    add(r, 'not_tested', 'split set', 'Operations may partially succeed; completeness, signer rotation compatibility, installability and runtime behavior are not verified')
     return r
 
 

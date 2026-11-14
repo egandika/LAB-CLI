@@ -278,11 +278,15 @@ def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     if tool:
         result = run([tool, "dump", "badging", path])
         if result["returncode"] == 0:
-            line = next((line for line in result["stdout"].splitlines() if line.startswith('package:')), '')
-            attrs = dict(re.findall(r"([\w]+)='([^']*)'", line))
+            lines = result["stdout"].splitlines(keepends=True)
+            line = next((line for line in lines if line.startswith('package:')), '')
+            incomplete = bool(result.get('stdout_truncated') and line and not line.endswith(('\n', '\r')))
+            attrs = dict(re.findall(r"([\w]+)='([^']*)'", line)) if not incomplete else {}
             if attrs.get('name') and attrs.get('versionCode'):
                 item.update(package=attrs['name'], version_code=attrs['versionCode'], version_name=attrs.get('versionName'), split=attrs.get('split'))
                 add(r, "verified", str(path), "Package and version code read with aapt")
+            elif result.get('stdout_truncated'):
+                add(r, "not_tested", str(path), "aapt package metadata unavailable in truncated output")
             else:
                 add(r, "failures", str(path), "aapt returned no parseable package metadata")
         else:
@@ -293,12 +297,18 @@ def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     if signer:
         result = run([signer, "verify", "--verbose", "--print-certs", path])
         if result["returncode"] == 0:
-            digests = re.findall(r'^Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F:]+)\s*$', result['stdout'], re.MULTILINE)
-            if digests and all(len(d.replace(':', '')) == 64 for d in digests):
+            matches = re.findall(r'^Signer #(\d+) certificate SHA-256 digest:\s*([0-9a-fA-F:]+)\s*$', result['stdout'], re.MULTILINE)
+            declared = re.search(r'^Number of signers:\s*(\d+)\s*$', result['stdout'], re.MULTILINE)
+            numbers = [int(number) for number, _ in matches]
+            digests = [digest for _, digest in matches]
+            if (digests and not result.get('stdout_truncated') and not result.get('capture_incomplete')
+                    and sorted(numbers) == list(range(1, len(numbers) + 1))
+                    and (not declared or int(declared.group(1)) == len(numbers))
+                    and all(len(d.replace(':', '')) == 64 for d in digests)):
                 item['signer_sha256'] = sorted({d.replace(':', '').lower() for d in digests})
             add(r, "verified", str(path), "apksigner verification passed: " + result["stdout"][:4000])
             if item['signer_sha256'] is None:
-                add(r, "not_tested", str(path), "Signer certificate digest could not be parsed")
+                add(r, "not_tested", str(path), "Signer certificate digest could not be parsed completely")
         else:
             add(r, "failures", str(path), "apksigner verification failed: " + (result["stderr"] or result["stdout"])[:2000])
     else:

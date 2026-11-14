@@ -4,6 +4,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from .core import add, find_tool, inspect_one, reported, run
+from .split_metadata import assess_outputs, read_dependencies
 
 
 @reported
@@ -54,6 +55,16 @@ def install_test(serial, apks, confirm=False, launch=False, _report=None):
             raise ValueError('Exactly one base candidate without a split name is required')
         splits = [a['split'] for a in items if a.get('split')]
         if len(splits) != len(set(splits)): raise ValueError('Duplicate split names')
+        observations = [{'id': str(i), 'source': str(inputs[i]), 'apk': item, 'dependencies': read_dependencies(copy)}
+                        for i, (copy, item) in enumerate(zip(copies, items))]
+        r['split_observations'] = observations
+        r['split_analysis'] = analysis = assess_outputs(observations)
+        if analysis['issues']:
+            for issue in analysis['issues']: add(r, 'failures', 'split set', issue)
+            add(r, 'not_tested', 'installation', 'Installation was blocked by split metadata checks')
+            return r
+        for unknown in analysis['unknown']:
+            add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
         package = next(iter(packages))
         if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+', package):
             raise ValueError('Unsupported package name')
