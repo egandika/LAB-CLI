@@ -2,6 +2,9 @@
 
 This is an index, not a decompiler or call-graph analyzer.
 """
+
+from __future__ import annotations
+from typing import Any, Optional
 import re
 import struct
 
@@ -12,7 +15,7 @@ MAX_METHOD_CHARS = 32 * 1024 * 1024
 URL = re.compile(r'https?://[^\s\x00<>"\'\\]+', re.I)
 
 
-def read_uleb32(data, offset):
+def read_uleb32(data: bytes, offset: int) -> tuple:
     value = 0
     for i in range(5):
         if offset >= len(data): raise ValueError('Truncated DEX ULEB128')
@@ -23,7 +26,7 @@ def read_uleb32(data, offset):
     raise ValueError('Invalid DEX ULEB128')
 
 
-def decode_mutf8(raw, utf16_size):
+def decode_mutf8(raw: bytes, utf16_size: int) -> str:
     """Decode DEX MUTF-8, retaining even unpaired UTF-16 surrogate units."""
     units = bytearray()
     i = 0
@@ -53,7 +56,7 @@ class UnsupportedDexContainer(ValueError):
     """A recognizable DEX 041 container is not supported by this indexer."""
 
 
-def read_dex(data):
+def read_dex(data: bytes) -> dict:
     if bytes(data[:8]) == b'dex\n041\0':
         if len(data) < 120:
             raise ValueError('Truncated DEX 041 container header')

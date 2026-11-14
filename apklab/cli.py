@@ -1,3 +1,6 @@
+
+from __future__ import annotations
+from typing import Any, Optional
 import argparse
 import os
 import re
@@ -26,7 +29,7 @@ VERSION_ARGS = {
 }
 
 
-def doctor(args):
+def doctor(args: argparse.Namespace) -> dict:
     r = report()
     r['tools'] = {}
     if args.check: r['probes'] = {}
@@ -65,7 +68,7 @@ def doctor(args):
     return r
 
 
-def setup(args):
+def setup(args: argparse.Namespace) -> dict:
     r = report()
     packages = {'java': 'default-jre-headless', 'apktool': 'apktool', 'adb': 'adb', 'aapt': 'aapt', 'zipalign': 'zipalign', 'apksigner': 'apksigner'}
     r['plan'] = setup_guidance()
@@ -106,12 +109,12 @@ def setup(args):
     return r
 
 
-def find_executable(name):
+def find_executable(name: str) -> Optional[str]:
     import shutil
     return shutil.which(name)
 
 
-def apk_paths(inputs, recursive=False):
+def apk_paths(inputs: Any, recursive: bool=False) -> list:
     paths = []
     for name in inputs:
         p = Path(name)
@@ -123,7 +126,7 @@ def apk_paths(inputs, recursive=False):
 
 
 @reported
-def inspect(args, _report):
+def inspect(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['apks'] = []
     for p in apk_paths(args.apks, args.recursive):
@@ -171,7 +174,7 @@ def inspect(args, _report):
 
 
 @reported
-def xapk(args, _report):
+def xapk(args: argparse.Namespace, _report: Any) -> dict:
     from .publish import publish_new, staging
     r = _report
     entry, total = args.max_entry_mib * MIB, args.max_total_mib * MIB
@@ -237,7 +240,7 @@ def xapk(args, _report):
 
 
 @reported
-def inventory(args, _report):
+def inventory(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['files'] = []
     with zipfile.ZipFile(args.apk) as z:
@@ -307,7 +310,7 @@ def inventory(args, _report):
 
 
 @reported
-def dex(args, _report):
+def dex(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['dex_files'] = []
     with zipfile.ZipFile(args.apk) as z:
@@ -371,7 +374,7 @@ def dex(args, _report):
 
 
 @reported
-def work(args, _report):
+def work(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     if args.stage == 'init':
         dest = init(args.apk, args.workspace)
@@ -432,7 +435,7 @@ def work(args, _report):
     return r
 
 
-def jadx(args):
+def jadx(args: argparse.Namespace) -> dict:
     r = report()
     size, diagnostics = decompile(args.apk, args.output, args.timeout, args.max_output_mib * MIB, include_diagnostics=True)
     r['jadx_diagnostics'] = diagnostics
@@ -443,12 +446,12 @@ def jadx(args):
     return r
 
 
-def device(args):
+def device(args: argparse.Namespace) -> dict:
     return install_test(args.serial, args.apks, args.confirm_install, args.launch)
 
 
 @reported
-def splits(args, _report):
+def splits(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     if args.action == 'init':
         r['members'] = init_set(args.workspace, args.apks)
@@ -516,12 +519,12 @@ def splits(args, _report):
     return r
 
 
-def zip_limits(p):
+def zip_limits(p: argparse.ArgumentParser) -> None:
     p.add_argument('--max-entry-mib', type=int, default=64, help='Max uncompressed entry size in MiB (default 64)')
     p.add_argument('--max-total-mib', type=int, default=512, help='Max total uncompressed size in MiB (default 512)')
 
 
-def parser():
+def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog='apklab', description='APKLab: evidence-oriented APK analysis and copy-based workflows')
     p.add_argument('--summary', action='store_true', help='Print a human-readable summary above JSON')
     p.add_argument('--redact', action='store_true', help='Best-effort redaction of sensitive report strings')
@@ -614,7 +617,7 @@ def parser():
     return p
 
 
-def main(argv=None):
+def main(argv: Any=None) -> int:
     args = parser().parse_args(argv)
     try:
         if getattr(args, 'limit', 1) < 1: raise ValueError('--limit must be positive')

@@ -1,4 +1,8 @@
 """Conservative observations of split relationships from aapt XML-tree output."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 import re
 from .core import find_tool, run
 
@@ -12,7 +16,7 @@ _TYPED_INT = re.compile(r'^\(type\s+0x1[01]\)0x([0-9a-fA-F]+)(?:\s|$)')
 _TYPED_BOOL = re.compile(r'^\(type\s+0x12\)0x([0-9a-fA-F]+)(?:\s|$)')
 
 
-def parse_dependencies(text, truncated=False):
+def parse_dependencies(text: str, truncated: bool=False) -> dict:
     """Read selected declarations, marking incomplete or unparseable values unknown.
 
     Only root manifest attributes, root uses-split elements and the application
@@ -91,7 +95,7 @@ def parse_dependencies(text, truncated=False):
     return result
 
 
-def read_dependencies(apk):
+def read_dependencies(apk: Union[str, PathLike]) -> dict:
     tool = find_tool('aapt')
     if not tool: return {'status': 'unavailable', 'reason': 'aapt not found'}
     result = run([tool, 'dump', 'xmltree', apk, 'AndroidManifest.xml'], timeout=120)
@@ -100,7 +104,7 @@ def read_dependencies(apk):
     return parse_dependencies(result['stdout'], bool(result.get('stdout_truncated') or result.get('capture_incomplete')))
 
 
-def assess_outputs(records):
+def assess_outputs(records: Any) -> dict:
     """Compare known facts and explicit references; unknowns never imply completeness."""
     issues, unknown = [], []
     apks = [record.get('apk') for record in records]

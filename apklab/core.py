@@ -1,4 +1,8 @@
 """Core helpers. APKs and their contents are untrusted input."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 import json
 import contextlib
 import functools
@@ -48,7 +52,7 @@ def _executable_names(item):
     return [item + ext for ext in ('.exe', '.bat', '.cmd')] + [item]
 
 
-def find_tool(name):
+def find_tool(name: str) -> Optional[str]:
     names = TOOLS[name]
     # Explicit PATH choices take precedence over SDK fallback.
     for item in names:
@@ -87,7 +91,7 @@ def _validate_windows_batch_args(args):
             raise OSError('Unsafe Windows batch argument; shell metacharacters are not supported')
 
 
-def run(args, timeout=120, monitor=None):
+def run(args: Any, timeout: int=120, monitor: Any=None) -> dict:
     """Run a process with bounded capture and best-effort process-tree cleanup.
 
     monitor, when supplied, is called during execution and after termination;
@@ -168,7 +172,7 @@ def run(args, timeout=120, monitor=None):
     return result
 
 
-def report():
+def report() -> dict:
     return {"verified": [], "inferences": [], "failures": [], "not_tested": []}
 
 
@@ -181,14 +185,14 @@ class PartialReportError(Exception):
 
 
 @contextlib.contextmanager
-def preserve_report(partial_report):
+def preserve_report(partial_report: Any) -> Any:
     try:
         yield
     except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError, EOFError, zlib.error) as exc:
         raise PartialReportError(partial_report, exc) from exc
 
 
-def reported(func):
+def reported(func: Any) -> Any:
     """Preserve report entries when a command fails after recording progress."""
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -198,11 +202,11 @@ def reported(func):
     return wrapper
 
 
-def add(r, category, subject, detail):
+def add(r: Any, category: str, subject: str, detail: str) -> None:
     r[category].append({"subject": subject, "detail": detail})
 
 
-def redact_report(value):
+def redact_report(value: Any) -> Any:
     """Best-effort recursive report redaction, not a security guarantee."""
     sensitive_key = re.compile(r'(?i)(?:password|passwd|secret|token|api[_-]?key|authorization|credential)')
     def clean(text):
@@ -228,7 +232,7 @@ def redact_report(value):
     return value
 
 
-def emit(r, output=None, summary=False, redact=False):
+def emit(r: Any, output: Optional[Union[str, PathLike]]=None, summary: bool=False, redact: bool=False) -> None:
     if redact: r = redact_report(r)
     # Escape isolated UTF-16 surrogates that valid DEX MUTF-8 can contain.
     text = json.dumps(r, indent=2, ensure_ascii=False).encode('utf-8', 'backslashreplace').decode('utf-8')
@@ -247,7 +251,7 @@ def emit(r, output=None, summary=False, redact=False):
     print(text)
 
 
-def zip_infos(z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
+def zip_infos(z: Any, max_entry: int=MAX_ENTRY, max_total: int=MAX_TOTAL) -> list:
     if max_entry < 1 or max_total < 1:
         raise ValueError('ZIP size limits must be positive')
     infos = z.infolist()
@@ -258,7 +262,7 @@ def zip_infos(z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     return infos
 
 
-def check_zip_crc(z, infos):
+def check_zip_crc(z: Any, infos: Any) -> Optional[str]:
     """Read each central-directory entry by identity, including duplicate names."""
     for info in infos:
         if info.is_dir():
@@ -272,7 +276,7 @@ def check_zip_crc(z, infos):
     return None
 
 
-def validate_apk_archive(path, z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
+def validate_apk_archive(path: Union[str, PathLike], z: Any, max_entry: int=MAX_ENTRY, max_total: int=MAX_TOTAL) -> list:
     """Validate basic APK ZIP structure and CRCs, not signatures or manifest contents."""
     if Path(path).suffix.lower() == '.xapk':
         raise ValueError('XAPK is an archive, not an APK; use apklab xapk inspect or unpack')
@@ -285,7 +289,7 @@ def validate_apk_archive(path, z, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
     return infos
 
 
-def inspect_one(path, r, max_entry=MAX_ENTRY, max_total=MAX_TOTAL):
+def inspect_one(path: Union[str, PathLike], r: Any, max_entry: int=MAX_ENTRY, max_total: int=MAX_TOTAL) -> dict:
     path = Path(path)
     item = {"file": str(path), "package": None, "version_name": None, "version_code": None, "architectures": [], "signer_sha256": None}
     if path.suffix.lower() == '.xapk':

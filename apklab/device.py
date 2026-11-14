@@ -1,4 +1,8 @@
 """Opt-in, disposable-emulator-only installation test for copies of APKs."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 import re
 import shutil
 import tempfile
@@ -8,7 +12,7 @@ from .split_metadata import assess_outputs, read_dependencies
 
 
 @reported
-def install_test(serial, apks, confirm=False, launch=False, _report=None):
+def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False, _report: Any=None) -> dict:
     r = _report
     if not re.fullmatch(r'emulator-[0-9]+', serial):
         raise ValueError('An explicit emulator-NNNN serial is required; physical devices are refused')

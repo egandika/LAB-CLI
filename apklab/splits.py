@@ -1,4 +1,8 @@
 """Copy-based split set workspaces; operations are deliberately non-destructive."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 import hashlib
 import json
 import os
@@ -10,14 +14,14 @@ from .publish import publish_new, staging
 MAX_APKS = 1000
 
 
-def sha256(path):
+def sha256(path: Union[str, PathLike]) -> str:
     digest = hashlib.sha256()
     with Path(path).open('rb') as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b''): digest.update(chunk)
     return digest.hexdigest()
 
 
-def init_set(destination, paths):
+def init_set(destination: Union[str, PathLike], paths: Any) -> list:
     inputs = [Path(p).resolve(strict=True) for p in paths]
     if not inputs or len(inputs) > MAX_APKS: raise ValueError('Provide 1 to 1000 APK files')
     if len(inputs) != len(set(inputs)): raise ValueError('Duplicate APK paths')
@@ -41,7 +45,7 @@ def init_set(destination, paths):
 
 
 
-def read_set(destination):
+def read_set(destination: Union[str, PathLike]) -> tuple:
     root = Path(destination).resolve(strict=True)
     metadata = root / 'split-set.json'
     if not metadata.is_file() or metadata.stat().st_size > 1024 * 1024:

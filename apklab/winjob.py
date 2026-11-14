@@ -43,7 +43,7 @@ class WindowsJob:
         if not self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
             error = ctypes.get_last_error(); self.close(); raise ctypes.WinError(error)
 
-    def attach_and_resume(self, process):
+    def attach_and_resume(self, process: object) -> None:
         if not self.kernel.AssignProcessToJobObject(self.handle, int(process._handle)):
             raise ctypes.WinError(ctypes.get_last_error())
         ntdll = ctypes.WinDLL('ntdll')
@@ -52,7 +52,7 @@ class WindowsJob:
         status = ntdll.NtResumeProcess(int(process._handle))
         if status != 0: raise OSError('NtResumeProcess failed with status ' + str(status))
 
-    def close(self):
+    def close(self) -> None:
         if self.handle:
             self.kernel.CloseHandle(self.handle)
             self.handle = None

@@ -1,4 +1,8 @@
 """Bounded XAPK archive inspection and extraction; never execute archive code."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 from collections import Counter
 import hashlib
 import json
@@ -13,7 +17,7 @@ MAX_FILES = 100000
 CHUNK = 1024 * 1024
 
 
-def validate(z, max_entry, max_total):
+def validate(z: Any, max_entry: int, max_total: int) -> list:
     if max_entry < 1 or max_total < 1:
         raise ValueError('Size limits must be positive')
     infos = z.infolist()
@@ -50,7 +54,7 @@ def validate(z, max_entry, max_total):
     return infos
 
 
-def stream_entry(z, info, out=None):
+def stream_entry(z: Any, info: Any, out: Any=None) -> str:
     digest = hashlib.sha256()
     total = 0
     with z.open(info) as src:
@@ -65,12 +69,12 @@ def stream_entry(z, info, out=None):
     return digest.hexdigest()
 
 
-def summarize(infos):
+def summarize(infos: Any) -> list:
     return [{'path': i.filename, 'size': i.file_size,
              'kind': 'directory' if i.is_dir() else 'apk' if i.filename.lower().endswith('.apk') else 'obb' if i.filename.lower().endswith('.obb') else 'other'} for i in infos]
 
 
-def examine(path, max_entry, max_total, verify=False):
+def examine(path: Union[str, PathLike], max_entry: int, max_total: int, verify: bool=False) -> list:
     with zipfile.ZipFile(path) as z:
         infos = validate(z, max_entry, max_total)
         items = summarize(infos)
@@ -80,7 +84,7 @@ def examine(path, max_entry, max_total, verify=False):
         return items
 
 
-def unpack(path, destination, max_entry, max_total):
+def unpack(path: Union[str, PathLike], destination: Union[str, PathLike], max_entry: int, max_total: int) -> list:
     dest = Path(destination)
     # The archive is opened read-only; destination must not exist.
     with zipfile.ZipFile(path) as z:
@@ -106,7 +110,7 @@ def unpack(path, destination, max_entry, max_total):
             raise
 
 
-def manifest_info(path, entries, directory=False):
+def manifest_info(path: Union[str, PathLike], entries: Any, directory: bool=False) -> dict:
     """Compare the optional APKPure-style split_apks list, not trust it as truth."""
     item = next((i for i in entries if i['path'] == 'manifest.json' and i['kind'] == 'other'), None)
     if not item:
@@ -136,7 +140,7 @@ def manifest_info(path, entries, directory=False):
             'duplicate_references': sorted(x for x, count in Counter(filenames).items() if count > 1)}
 
 
-def repack(path, destination, replacements, max_entry, max_total, *, update_manifest=False):
+def repack(path: Union[str, PathLike], destination: Union[str, PathLike], replacements: Any, max_entry: int, max_total: int, *, update_manifest: bool=False) -> list:
     """Copy a validated archive into a new XAPK, optionally replacing APK entries."""
     import copy
     from .core import validate_apk_archive
@@ -234,7 +238,7 @@ def repack(path, destination, replacements, max_entry, max_total, *, update_mani
                 raise
 
 
-def obb_layout(path, infos):
+def obb_layout(path: Union[str, PathLike], infos: Any) -> dict:
     """Validate the supported APKPure-style package_name/expansions layout."""
     names = {i.filename for i in infos if not i.is_dir()}
     obbs = {n for n in names if n.lower().endswith('.obb')}
@@ -267,7 +271,7 @@ def obb_layout(path, infos):
     return mapping
 
 
-def repack_directory(path, destination, replacements, max_entry, max_total, *, update_manifest=False):
+def repack_directory(path: Union[str, PathLike], destination: Union[str, PathLike], replacements: Any, max_entry: int, max_total: int, *, update_manifest: bool=False) -> list:
     """Create a directory with new archive and strictly manifest-validated OBB layout."""
     with zipfile.ZipFile(path) as z:
         infos = validate(z, max_entry, max_total)

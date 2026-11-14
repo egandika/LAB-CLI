@@ -1,4 +1,8 @@
 """Stage output beside its destination and publish without replacing an existing path."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 import contextlib
 import ctypes
 import errno
@@ -9,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 
-def publish_new(source, destination, directory=False):
+def publish_new(source: Union[str, PathLike], destination: Union[str, PathLike], directory: bool=False) -> None:
     source, destination = Path(source), Path(destination)
     if not directory:
         # A same-filesystem hard link creates the destination exclusively.
@@ -38,7 +42,7 @@ def publish_new(source, destination, directory=False):
 
 
 @contextlib.contextmanager
-def staging(destination):
+def staging(destination: Union[str, PathLike]) -> Any:
     """Yield a private sibling staging path and preserve errors if cleanup fails."""
     dest = Path(destination)
     tmp = Path(tempfile.mkdtemp(prefix='.apklab-stage-', dir=str(dest.parent)))

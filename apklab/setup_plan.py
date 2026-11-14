@@ -1,5 +1,8 @@
 """Non-executing, cross-platform tool setup guidance."""
 
+from __future__ import annotations
+from typing import Any, Optional
+
 SOURCES = {
     'apktool': ('https://apktool.org/docs/install/', 'Download the official wrapper and versioned JAR; compare the JAR SHA-256 with an upstream published digest when available.'),
     'build-tools': ('https://developer.android.com/studio#command-line-tools-only', 'Download SDK command-line tools for your OS and compare SHA-256 against the digest on the download page; use sdkmanager to install build-tools and platform-tools.'),
@@ -20,7 +23,7 @@ NEXT = {
 }
 
 
-def plan():
+def plan() -> dict:
     return {
         'sources': {k: {'url': url, 'instructions': instructions} for k, (url, instructions) in SOURCES.items()},
         'checksum': 'For SHA-256, compare sha256sum FILE (Linux/Termux) or shasum -a 256 FILE (macOS) to a digest obtained independently from the official release page. If no digest/signature is published, integrity is not verified.',

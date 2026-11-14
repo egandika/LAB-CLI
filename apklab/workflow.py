@@ -1,4 +1,8 @@
 """Workspace lifecycle; never overwrite input or existing outputs."""
+
+from __future__ import annotations
+from typing import Any, Optional, Union
+from os import PathLike
 import shutil
 import os
 from pathlib import Path
@@ -6,7 +10,7 @@ from .core import find_tool, run
 from .publish import publish_new, staging
 
 
-def init(source, workspace):
+def init(source: Union[str, PathLike], workspace: Union[str, PathLike]) -> str:
     source = Path(source).resolve(strict=True)
     workspace = Path(workspace)
     if not source.is_file() or source.suffix.lower() != '.apk':
@@ -20,7 +24,7 @@ def init(source, workspace):
     return str(workspace.resolve())
 
 
-def output_path(workspace, path):
+def output_path(workspace: Union[str, PathLike], path: Union[str, PathLike]) -> tuple:
     root = Path(workspace).resolve(strict=True)
     if not root.is_dir() or not (root / 'original.apk').is_file():
         raise ValueError('Not an APKLab workspace (original.apk missing)')
@@ -34,7 +38,7 @@ def output_path(workspace, path):
     return root, p
 
 
-def workspace_input(workspace, source):
+def workspace_input(workspace: Union[str, PathLike], source: Union[str, PathLike]) -> Path:
     root = Path(workspace).resolve(strict=True)
     if not root.is_dir() or not (root / 'original.apk').is_file():
         raise ValueError('Not an APKLab workspace (original.apk missing)')
@@ -45,13 +49,13 @@ def workspace_input(workspace, source):
     return src
 
 
-def supports_16k(tool):
+def supports_16k(tool: Any) -> bool:
     result = run([tool, '-h'], timeout=10)
     import re
     return bool(re.search(r'(?<!\w)-P(?:\s|,|<)', result['stdout'] + '\n' + result['stderr']))
 
 
-def perform(stage, workspace, source=None, output=None, keystore=None, alias=None, pass_env=None, page_size=4):
+def perform(stage: str, workspace: Union[str, PathLike], source: Optional[Union[str, PathLike]]=None, output: Optional[Union[str, PathLike]]=None, keystore: Optional[Union[str, PathLike]]=None, alias: Optional[str]=None, pass_env: Optional[str]=None, page_size: int=4) -> tuple:
     defaults = {'decode': 'decoded', 'jadx': 'jadx', 'build': 'rebuilt.apk', 'align': 'aligned.apk', 'sign': 'signed.apk'}
     root, dest = output_path(workspace, output or defaults[stage])
     toolname = {'decode': 'apktool', 'jadx': 'jadx', 'build': 'apktool', 'align': 'zipalign', 'sign': 'apksigner'}[stage]
