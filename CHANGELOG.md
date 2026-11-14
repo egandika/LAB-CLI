@@ -2,6 +2,7 @@
 
 ## 0.5.0 (unreleased)
 
+- Lower and sample JADX output caps more frequently (best effort), add optional report redaction, and warn about untrusted execution.
 - Check ELF LOAD segment alignment per native library during workspace verification, independently of ZIP alignment.
 - Inspect explicit split dependencies and optionally update supported XAPK manifest size/SHA-256 fields for replacements.
 - Report recognizable DEX 041 containers as not tested per entry and reject malformed container headers; cache repeated string offsets.

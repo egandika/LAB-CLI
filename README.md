@@ -103,7 +103,7 @@ apklab inspect app.apk
 apklab inspect base.apk split_config.arm64_v8a.apk
 apklab inspect ./split-directory --recursive --device-abi arm64-v8a --report inspection.json
 apklab dex app.apk --search login --limit 50
-apklab jadx app.apk ./jadx-output --timeout 600 --max-output-mib 512
+apklab jadx app.apk ./jadx-output --timeout 600 --max-output-mib 128
 apklab inventory app.apk --search lib --native-details --native-symbols --hash
 apklab inventory app.apk --text 'example.org'
 ```
@@ -122,7 +122,7 @@ apklab xapk unpack game.xapk ./xapk-copy
 apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 ```
 
-`jadx` copies the input to a temporary directory and creates a new output directory. Its JSON report includes up to 4,000 characters of JADX stderr and a truncation flag, including on successful runs; diagnostics may contain sensitive information. It stops the tool when the timeout or monitored output-size limit is exceeded and removes that newly created output on failure. Size checks are sampled and **are not a hard disk quota**; output can briefly exceed the limit. The runner terminates the POSIX process group or Windows job on exit, but detached or escaped processes are not guaranteed to be contained; this is not a sandbox. Use OS-level isolation and disk quotas for untrusted APKs. `work jadx` uses the same process runner and a 512 MiB monitored output limit; workspace stages stage their outputs before publication and clean up on failure. Atomic directory publication requires platform support; a cleanup error can leave a staging directory.
+`jadx` copies the input to a temporary directory and creates a new output directory. Its JSON report includes up to 4,000 characters of JADX stderr and a truncation flag, including on successful runs; diagnostics may contain sensitive information. It stops the tool when the timeout or monitored output-size limit is exceeded and removes that newly created output on failure. The default monitored output limit is 128 MiB; checks are sampled approximately every 10 ms while the monitor is active and **are not a hard disk quota**; output can briefly exceed the limit. The runner terminates the POSIX process group or Windows job on exit, but detached or escaped processes are not guaranteed to be contained; this is not a sandbox. Use OS-level isolation and disk quotas for untrusted APKs. `work jadx` uses the same process runner and a 128 MiB monitored output limit; workspace stages stage their outputs before publication and clean up on failure. Atomic directory publication requires platform support; a cleanup error can leave a staging directory.
 
 `xapk inspect` lists entries; `--verify` reads each file, checks CRC, and computes SHA-256. `unpack` only reads the original archive and copies its contents into a **new** directory, checking CRC and hashes. Path traversal, duplicate or colliding paths, symlinks, special files, encrypted entries, and size-limit violations are rejected.
 
@@ -195,7 +195,7 @@ Output is JSON by default. Add `--summary` to print a human-readable count and r
 
 Exit statuses are **0** (no failures or untested entries), **1** (one or more failures, taking precedence), **3** (no failures but one or more untested entries), and **2** for argument parsing errors. Status 3 is expected for many commands, including `doctor` and verification, because limitations remain. Shell scripts and CI must explicitly handle it; 0 still does not prove functionality beyond the stated checks.
 
-Reports may contain sensitive strings, endpoints, or paths. Prefer output outside the checkout; example output directories and `apklab-report*.json` are ignored as a safeguard, not a guarantee. Review and redact reports before sharing. Do not put APKs/XAPKs, OBBs, extracted data, keystores, credentials, or personal data in Git; `.gitignore` is a safeguard, not a guarantee.
+Use `--redact` on a command or its subcommand to apply best-effort redaction to report text and JSON (including `--summary` and `--report`): home paths, URLs, sensitive keys and token-like strings. This can over-redact hashes and can miss secrets; it is not a guarantee. Reports may contain sensitive strings, endpoints, or paths. Prefer output outside the checkout; example output directories and `apklab-report*.json` are ignored as a safeguard, not a guarantee. Review and redact reports before sharing. Do not put APKs/XAPKs, OBBs, extracted data, keystores, credentials, or personal data in Git; `.gitignore` is a safeguard, not a guarantee.
 
 ## Limitations
 

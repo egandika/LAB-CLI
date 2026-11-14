@@ -136,7 +136,7 @@ def run(args, timeout=120, monitor=None):
             if time.monotonic() >= deadline:
                 timed_out = True
                 break
-            time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+            time.sleep(min(0.01 if monitor else 0.05, max(0, deadline - time.monotonic())))
     except OSError as exc:
         error = str(exc)
     finally:
@@ -202,7 +202,34 @@ def add(r, category, subject, detail):
     r[category].append({"subject": subject, "detail": detail})
 
 
-def emit(r, output=None, summary=False):
+def redact_report(value):
+    """Best-effort recursive report redaction, not a security guarantee."""
+    sensitive_key = re.compile(r'(?i)(?:password|passwd|secret|token|api[_-]?key|authorization|credential)')
+    def clean(text):
+        home = str(Path.home())
+        if len(home) > 2:
+            text = re.sub(re.escape(home), '[HOME]', text, flags=re.IGNORECASE if _windows() else 0)
+        text = re.sub(r'(?i)\b[A-Z]:[\\/]Users[\\/][^\\/\s"\']+', '[HOME]', text)
+        text = re.sub(r'(?i)\b(?:https?|wss?|ftp)://[^\s<>"\']+', '[URL]', text)
+        text = re.sub(r'(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+', r'\1[REDACTED]', text)
+        text = re.sub(r'(?i)\b(password|passwd|secret|token|api[_-]?key|authorization|credential)(\s*[:=]\s*)([^\s,;]+)', r'\1\2[REDACTED]', text)
+        return re.sub(r'(?<![A-Za-z0-9])[A-Za-z0-9_+/=-]{32,}(?![A-Za-z0-9])', '[REDACTED]', text)
+    if isinstance(value, str): return clean(value)
+    if isinstance(value, list): return [redact_report(item) for item in value]
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            safe_key = clean(key) if isinstance(key, str) else key
+            base = safe_key; n = 2
+            while safe_key in result:
+                safe_key = str(base) + ' #' + str(n); n += 1
+            result[safe_key] = '[REDACTED]' if isinstance(key, str) and sensitive_key.search(key) else redact_report(item)
+        return result
+    return value
+
+
+def emit(r, output=None, summary=False, redact=False):
+    if redact: r = redact_report(r)
     # Escape isolated UTF-16 surrogates that valid DEX MUTF-8 can contain.
     text = json.dumps(r, indent=2, ensure_ascii=False).encode('utf-8', 'backslashreplace').decode('utf-8')
     if output:

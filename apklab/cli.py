@@ -520,12 +520,14 @@ def zip_limits(p):
 def parser():
     p = argparse.ArgumentParser(prog='apklab', description='APKLab: evidence-oriented APK analysis and copy-based workflows')
     p.add_argument('--summary', action='store_true', help='Print a human-readable summary above JSON')
+    p.add_argument('--redact', action='store_true', help='Best-effort redaction of sensitive report strings')
     p.add_argument('--version', action='version', version='%(prog)s ' + __version__)
     sub = p.add_subparsers(dest='command', required=True)
     def cmd(name, help, func):
         q = sub.add_parser(name, help=help, description=help)
         q.set_defaults(func=func)
         q.add_argument('--summary', action='store_true', default=argparse.SUPPRESS, help='Print a human-readable summary above JSON')
+        q.add_argument('--redact', action='store_true', default=argparse.SUPPRESS, help='Best-effort redaction of report strings')
         q.add_argument('--report', metavar='FILE', help='Write JSON report to a new file (never overwrite)')
         return q
     q = cmd('doctor', 'Find external Android and analysis tools', doctor)
@@ -544,6 +546,7 @@ def parser():
     for action in ('inspect', 'unpack', 'repack'):
         x = actions.add_parser(action, help=action + ' an XAPK archive')
         x.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+        x.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
         x.add_argument('archive')
         if action == 'unpack': x.add_argument('destination', help='New directory; parent must exist')
         elif action == 'repack':
@@ -568,14 +571,16 @@ def parser():
     q = cmd('jadx', 'Decompile a copy of an APK into a new directory', jadx)
     q.add_argument('apk'); q.add_argument('output')
     q.add_argument('--timeout', type=int, default=600, help='Timeout in seconds (default 600)')
-    q.add_argument('--max-output-mib', type=int, default=512, help='Best-effort monitored output cap in MiB (default 512)')
+    q.add_argument('--max-output-mib', type=int, default=128, help='Best-effort monitored output cap in MiB (default 128)')
     q = cmd('splits', 'Copy-based multi-APK split workflows', splits)
     actions = q.add_subparsers(dest='action', required=True)
     i = actions.add_parser('init', help='Copy APKs into a new split workspace')
     i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('workspace'); i.add_argument('apks', nargs='+')
     s = actions.add_parser('run', help='Run a stage for each APK copy')
     s.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    s.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     s.add_argument('workspace'); s.add_argument('stage', choices=('decode', 'build', 'align', 'sign', 'verify'))
     s.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Select ZIP alignment for align; verify attempts both 4 and 16 KiB regardless')
     s.add_argument('--keystore'); s.add_argument('--alias'); s.add_argument('--pass-env')
@@ -586,14 +591,16 @@ def parser():
     q.add_argument('apks', nargs='+', help='APK files to copy and install, including base and all needed splits')
     q = cmd('work', 'Copy-based decode/JADX/build/align/sign/verify workflow', work)
     stages = q.add_subparsers(dest='stage', required=True)
-    i = stages.add_parser('init', help='Copy APK to a new workspace'); i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS); i.add_argument('apk'); i.add_argument('workspace')
+    i = stages.add_parser('init', help='Copy APK to a new workspace'); i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS); i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS); i.add_argument('apk'); i.add_argument('workspace')
     v = stages.add_parser('verify', help='Check alignment and signature of an APK in the workspace')
     v.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    v.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     v.add_argument('workspace'); v.add_argument('--input', help='APK inside workspace (default signed.apk)')
     v.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Compatibility option only: verify attempts both 4 and 16 KiB ZIP alignment checks regardless')
     for stage in ('decode', 'jadx', 'build', 'align', 'sign'):
         s = stages.add_parser(stage, help=stage + ' within an APKLab workspace')
         s.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+        s.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
         s.add_argument('workspace'); s.add_argument('--input', help='Input path inside workspace')
         s.add_argument('--output', dest='output_path', help='New output path inside workspace')
         if stage == 'align': s.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Native library ZIP alignment in KiB (default 4)')
@@ -612,11 +619,17 @@ def main(argv=None):
         r = e.report; add(r, 'failures', args.command, str(e))
     except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError, EOFError, zlib.error) as e:
         r = report(); add(r, 'failures', args.command, str(e))
+    if args.command == 'device':
+        r.setdefault('warnings', []).append('Installing or launching untrusted APKs can execute code and alter device state; use an isolated disposable emulator.')
+    elif args.command == 'setup' and args.install:
+        r.setdefault('warnings', []).append('Installing packages executes external code and modifies the system; review sources and use isolation.')
+    elif args.command in ('jadx', 'work', 'splits', 'inventory', 'inspect', 'dex'):
+        r.setdefault('warnings', []).append('External tools may process untrusted input; process cleanup and output limits are not a sandbox.')
     try:
-        emit(r, args.report, args.summary)
+        emit(r, args.report, args.summary, args.redact)
     except OSError as e:
         add(r, 'failures', 'report', 'Cannot write report: ' + str(e))
-        emit(r, summary=args.summary)
+        emit(r, summary=args.summary, redact=args.redact)
     return 1 if r['failures'] else 3 if r['not_tested'] else 0
 
 if __name__ == '__main__':

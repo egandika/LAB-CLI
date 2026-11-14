@@ -99,4 +99,4 @@ class WorkspaceJadxLimitTests(unittest.TestCase):
                  contextlib.redirect_stdout(out):
                 code = main(['work','jadx',str(work)])
             self.assertEqual(code, 1)
-            self.assertIn('512 MiB', json.loads(out.getvalue())['failures'][0]['detail'])
+            self.assertIn('128 MiB', json.loads(out.getvalue())['failures'][0]['detail'])

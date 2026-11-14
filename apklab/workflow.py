@@ -82,8 +82,8 @@ def perform(stage, workspace, source=None, output=None, keystore=None, alias=Non
         if stage == 'jadx':
             from .jadx import directory_size
             def monitor():
-                if directory_size(staged) > 512 * 1024 * 1024:
-                    raise RuntimeError('JADX output exceeded the 512 MiB monitored limit')
+                if directory_size(staged, 128 * 1024 * 1024) > 128 * 1024 * 1024:
+                    raise RuntimeError('JADX output exceeded the 128 MiB monitored limit')
             result = run(args, timeout=600, monitor=monitor)
         else:
             result = run(args, timeout=600)
