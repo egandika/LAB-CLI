@@ -205,7 +205,7 @@ APKLAB_INTEGRATION_APK=/path/to/authorized-test.apk python3 -m unittest discover
 
 Without `APKLAB_INTEGRATION_APK`, this test is skipped. When enabled, missing required tools cause failure. Set `APKLAB_TEST_16K=1`, `APKLAB_TEST_JADX=1`, or `APKLAB_TEST_SPLITS=1` to opt into the corresponding checks; the split test uses two copies of one APK, not a genuine split set. `APKLAB_EMULATOR_SERIAL=emulator-5554` additionally installs and launches the test APK on that emulator. Only use a disposable, isolated emulator.
 
-GitHub Actions is configured for cross-platform unit tests, real Android tools, and a disposable-emulator test using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. The earlier single-APK round trip passed on Linux. Consult the current workflow results before claiming the new tests passed; installing or launching a sample does not prove that another APK or game will work.
+GitHub Actions is configured for cross-platform unit tests, real Android tools, and a disposable-emulator test using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. CI has successfully exercised JADX, a 16 KiB ZIP-aligned native entry, the multi-copy workflow, XAPK repacking, and installation and a launcher event on an API 30 emulator. The multi-copy fixture is not a genuine split set. Consult the current workflow results for the latest status; installing or launching a sample does not prove that another APK or game will work.
 
 ## License
 

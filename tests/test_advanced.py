@@ -52,7 +52,7 @@ class AdvancedTests(unittest.TestCase):
 
     def test_jadx_uses_copy_and_refuses_overwrite(self):
         def fake_run(args, timeout=600):
-            self.assertEqual(Path(args[-1]), self.work/'original.apk')
+            self.assertEqual(Path(args[-1]).resolve(), (self.work/'original.apk').resolve())
             self.assertIn('--no-res', args); Path(args[args.index('-d')+1]).mkdir()
             return {'returncode':0,'stdout':'','stderr':''}
         with patch('apklab.workflow.find_tool', return_value='/tool/jadx'), patch('apklab.workflow.run', side_effect=fake_run):
