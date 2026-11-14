@@ -7,7 +7,7 @@ import zlib
 from pathlib import Path
 from . import __version__
 from .core import TOOLS, PartialReportError, add, emit, find_tool, inspect_one, reported, report, run, validate_apk_archive
-from .dex import read_dex
+from .dex import read_dex, UnsupportedDexContainer
 from .workflow import init, perform, workspace_input, supports_16k
 from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, repack as repack_xapk, repack_directory, manifest_info
 from .device import install_test
@@ -314,6 +314,9 @@ def dex(args, _report):
                 add(r, 'verified', name, 'Indexed DEX identifier tables and string literals, not code behavior; lists are capped')
                 r['dex_files'][-1]['obfuscation_candidates'] = candidates(classes, d['strings'], args.limit)
                 add(r, 'inferences', name, 'Model names, URLs, short class names and encoded-looking strings are hints, not proof of obfuscation, use or server availability')
+            except UnsupportedDexContainer as e:
+                r['dex_files'].append({'file': name, 'zip_entry_index': index, 'status': 'not_tested', 'reason': str(e)})
+                add(r, 'not_tested', name, str(e))
             except (ValueError, IndexError, zipfile.BadZipFile) as e:
                 add(r, 'failures', name, str(e))
     tool = find_tool('aapt')

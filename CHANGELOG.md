@@ -2,6 +2,7 @@
 
 ## 0.5.0 (unreleased)
 
+- Report recognizable DEX 041 containers as not tested per entry and reject malformed container headers; cache repeated string offsets.
 - Add bounded internal binary-AXML literal metadata fallback, a doctor feature/tool table, and broader setup-plan guidance.
 
 - Check duplicate ZIP entries individually, bound subprocess output, and make process cleanup best effort across POSIX and Windows.

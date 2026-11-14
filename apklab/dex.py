@@ -49,7 +49,19 @@ def decode_mutf8(raw, utf16_size):
     return units.decode('utf-16-le', 'surrogatepass')
 
 
+class UnsupportedDexContainer(ValueError):
+    """A recognizable DEX 041 container is not supported by this indexer."""
+
+
 def read_dex(data):
+    if bytes(data[:8]) == b'dex\n041\0':
+        if len(data) < 120:
+            raise ValueError('Truncated DEX 041 container header')
+        file_size, header_size, endian = struct.unpack_from('<III', data, 32)
+        container_size, header_offset = struct.unpack_from('<II', data, 112)
+        if header_size != 120 or endian != 0x12345678 or file_size < 120 or file_size > len(data) or container_size != len(data) or header_offset != 0:
+            raise ValueError('Invalid DEX 041 container header or bounds')
+        raise UnsupportedDexContainer('DEX 041 container is not indexed; shared container offsets and additional headers are not validated')
     if len(data) < 112 or bytes(data[:8]) not in {b'dex\n035\0', b'dex\n037\0', b'dex\n038\0', b'dex\n039\0', b'dex\n040\0'}:
         raise ValueError('Invalid or unsupported DEX header')
     u32 = lambda off: struct.unpack_from('<I', data, off)[0]
@@ -71,16 +83,26 @@ def read_dex(data):
     nc, co = table(96, 32)
     strings = []
     decoded_bytes = 0
+    string_cache = {}
     for i in range(ns):
         p = u32(so + i * 4)
         if p < 112 or p >= len(data): raise ValueError('Invalid string offset')
+        if p in string_cache:
+            value = string_cache[p]
+            decoded_bytes += len(value)
+            if decoded_bytes > 64 * 1024 * 1024: raise ValueError('DEX strings exceed safety limit')
+            strings.append(value)
+            continue
+        start = p
         utf16_size, p = read_uleb32(data, p)
         if utf16_size > 64 * 1024 * 1024: raise ValueError('DEX string length exceeds safety limit')
         end = data.find(b'\0', p)
         if end < 0: raise ValueError('Unterminated DEX string')
         decoded_bytes += end - p
         if decoded_bytes > 64 * 1024 * 1024: raise ValueError('DEX strings exceed safety limit')
-        strings.append(decode_mutf8(data[p:end], utf16_size))
+        value = decode_mutf8(data[p:end], utf16_size)
+        string_cache[start] = value
+        strings.append(value)
     def string(i):
         if i >= len(strings): raise ValueError('Invalid string index')
         return strings[i]
