@@ -31,7 +31,7 @@ class ProbeAndVerifyTests(unittest.TestCase):
             return {'returncode': 1 if args[0].endswith('aapt') else 0, 'stdout': 'version', 'stderr': ''}
         with patch('apklab.cli.find_tool', side_effect=find), patch('apklab.cli.run', side_effect=run):
             code, r = self.call('doctor', '--check')
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 3)
         self.assertEqual(r['probes']['java']['returncode'], 0)
         self.assertEqual(r['probes']['aapt']['returncode'], 1)
         self.assertTrue(any(x['subject'] == 'zipalign' and 'No safe' in x['detail'] for x in r['not_tested']))
@@ -63,9 +63,9 @@ class ProbeAndVerifyTests(unittest.TestCase):
         self.assertTrue(any(x['subject'] == 'runtime' for x in r['not_tested']))
         with patch('apklab.cli.find_tool', return_value=None):
             code, r = self.call('work', 'verify', str(self.workspace))
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 3)
         self.assertFalse(r['verified'])
-        self.assertEqual({x['subject'] for x in r['not_tested']}, {'zipalign', 'apksigner', 'runtime'})
+        self.assertEqual({x['subject'] for x in r['not_tested']}, {'zipalign', 'zipalign_16k', 'apksigner', 'runtime'})
 
     def test_native_duplicate_entries_are_processed_individually(self):
         import warnings
@@ -73,6 +73,7 @@ class ProbeAndVerifyTests(unittest.TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', UserWarning)
             with zipfile.ZipFile(sample, 'w') as z:
+                z.writestr('AndroidManifest.xml', 'fixture')
                 z.writestr('lib/arm64/libsample.so', b'first')
                 z.writestr('lib/arm64/libsample.so', b'second')
         observed = []
@@ -81,7 +82,7 @@ class ProbeAndVerifyTests(unittest.TestCase):
             return {'returncode': 0, 'stdout': 'ok', 'stderr': ''}
         with patch('apklab.cli.find_tool', return_value='/fake/readelf'), patch('apklab.cli.run', side_effect=fake_readelf):
             code, r = self.call('inventory', str(sample), '--native-details')
-        self.assertEqual(code, 0, r)
+        self.assertEqual(code, 3, r)
         self.assertEqual(observed, [b'first', b'second'])
 
     def test_verify_refuses_external_input_and_missing_file(self):
@@ -91,9 +92,9 @@ class ProbeAndVerifyTests(unittest.TestCase):
                 self.assertEqual(code, 1); self.assertTrue(r['failures'])
 
     def test_verify_success_is_not_runtime_proof(self):
-        with patch('apklab.cli.find_tool', return_value='/fake/tool'), patch('apklab.cli.run', return_value={'returncode': 0, 'stdout': '', 'stderr': ''}):
+        with patch('apklab.cli.supports_16k', return_value=False), patch('apklab.cli.find_tool', return_value='/fake/tool'), patch('apklab.cli.run', return_value={'returncode': 0, 'stdout': '', 'stderr': ''}):
             code, r = self.call('work', 'verify', str(self.workspace))
-        self.assertEqual(code, 0); self.assertEqual(len(r['verified']), 2)
+        self.assertEqual(code, 3); self.assertEqual(len(r['verified']), 2)
         self.assertTrue(any(x['subject'] == 'runtime' for x in r['not_tested']))
 
 if __name__ == '__main__': unittest.main()

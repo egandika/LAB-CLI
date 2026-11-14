@@ -26,7 +26,7 @@ jobs:
       - run: python -m pip install .
       - run: python .github/scripts/run_unit_tests.py
       - run: apklab --help
-      - run: apklab doctor --check
+      - run: python -c "import subprocess, sys; sys.exit(0 if subprocess.run([sys.executable, '-m', 'apklab', 'doctor', '--check']).returncode == 3 else 1)"
 
   android-tools:
     name: Android tool integration

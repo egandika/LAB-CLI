@@ -3,11 +3,12 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from .core import add, find_tool, inspect_one, report, run
+from .core import add, find_tool, inspect_one, reported, run
 
 
-def install_test(serial, apks, confirm=False, launch=False):
-    r = report()
+@reported
+def install_test(serial, apks, confirm=False, launch=False, _report=None):
+    r = _report
     if not re.fullmatch(r'emulator-[0-9]+', serial):
         raise ValueError('An explicit emulator-NNNN serial is required; physical devices are refused')
     if not confirm:
@@ -62,6 +63,8 @@ def install_test(serial, apks, confirm=False, launch=False):
             raise ValueError('Could not safely determine installed packages')
         if 'package:' + package in lines:
             raise ValueError('Package already exists on emulator; refusing to replace it')
+        add(r, 'not_tested', 'runtime', 'Installation or a launcher event does not prove app functionality; device state may change even on failure')
+        add(r, 'not_tested', 'split completeness', 'Split requirements, OBBs, and device compatibility are not fully validated')
         result = adb_command('install-multiple' if len(copies) > 1 else 'install', *copies)
         r['install'] = result
         if result['returncode'] != 0 or not re.search(r'(?m)^Success\s*$', result['stdout']):
@@ -78,6 +81,4 @@ def install_test(serial, apks, confirm=False, launch=False):
                 add(r, 'verified', 'launch', 'ADB reported one launcher event; app functionality was not assessed')
         else:
             add(r, 'not_tested', 'launch', 'Launch not requested')
-    add(r, 'not_tested', 'runtime', 'Installation or a launcher event does not prove app functionality; app remains installed')
-    add(r, 'not_tested', 'split completeness', 'Split requirements, OBBs, and device compatibility are not fully validated')
     return r

@@ -1,7 +1,9 @@
 """Workspace lifecycle; never overwrite input or existing outputs."""
 import shutil
+import os
 from pathlib import Path
 from .core import find_tool, run
+from .publish import publish_new, staging
 
 
 def init(source, workspace):
@@ -9,12 +11,12 @@ def init(source, workspace):
     workspace = Path(workspace)
     if not source.is_file() or source.suffix.lower() != '.apk':
         raise ValueError('Source must be an APK file')
-    workspace.mkdir(parents=True, exist_ok=False)
-    try:
-        shutil.copy2(source, workspace / 'original.apk')
-    except Exception:
-        workspace.rmdir()
-        raise
+    if os.path.lexists(workspace): raise FileExistsError('Workspace already exists: ' + str(workspace))
+    workspace.parent.mkdir(parents=True, exist_ok=True)
+    with staging(workspace) as staged:
+        staged.mkdir()
+        shutil.copy2(source, staged / 'original.apk')
+        publish_new(staged, workspace, directory=True)
     return str(workspace.resolve())
 
 
@@ -23,7 +25,9 @@ def output_path(workspace, path):
     if not root.is_dir() or not (root / 'original.apk').is_file():
         raise ValueError('Not an APKLab workspace (original.apk missing)')
     p = Path(path)
-    p = (root / p).resolve() if not p.is_absolute() else p.resolve()
+    p = root / p if not p.is_absolute() else p
+    if os.path.lexists(p): raise ValueError('Output already exists: ' + str(p))
+    p = p.resolve()
     if not p.is_relative_to(root) or p == root:
         raise ValueError('Output must be inside workspace')
     if p.exists(): raise ValueError('Output already exists: ' + str(p))
@@ -58,24 +62,37 @@ def perform(stage, workspace, source=None, output=None, keystore=None, alias=Non
     src = (root / src).resolve() if not src.is_absolute() else src.resolve()
     if not src.is_relative_to(root) or not src.exists():
         raise ValueError('Input must exist inside workspace')
-    if stage == 'decode': args = [tool, 'd', str(src), '-o', str(dest)]
-    elif stage == 'jadx':
-        if not src.is_file(): raise ValueError('JADX input must be a file')
-        args = [tool, '--no-res', '-d', str(dest), str(src)]
-    elif stage == 'build': args = [tool, 'b', str(src), '-o', str(dest)]
-    elif stage == 'align':
-        if page_size == 16 and not supports_16k(tool):
-            raise ValueError('zipalign does not advertise -P; Android build tools with 16 KiB support are required')
-        args = [tool] + (['-P', '16'] if page_size == 16 else ['-p']) + ['4', str(src), str(dest)]
-    else:
-        if not keystore or not alias or not pass_env:
-            raise ValueError('sign requires --keystore, --alias and --pass-env (environment variable name)')
-        import os
-        if pass_env not in os.environ: raise ValueError('Signing password environment variable is not set')
-        args = [tool, 'sign', '--ks', keystore, '--ks-key-alias', alias, '--ks-pass', 'env:' + pass_env,
-                '--out', str(dest), str(src)]
-    result = run(args, timeout=600)
-    if result['returncode'] != 0:
-        raise RuntimeError(toolname + ' failed: ' + (result['stderr'] or result['stdout'])[:4000])
-    if not dest.exists(): raise RuntimeError(toolname + ' reported success without output')
-    return str(dest), result
+    with staging(dest) as staged:
+        if stage == 'decode': args = [tool, 'd', str(src), '-o', str(staged)]
+        elif stage == 'jadx':
+            if not src.is_file(): raise ValueError('JADX input must be a file')
+            args = [tool, '--no-res', '-d', str(staged), str(src)]
+        elif stage == 'build': args = [tool, 'b', str(src), '-o', str(staged)]
+        elif stage == 'align':
+            if page_size == 16 and not supports_16k(tool):
+                raise ValueError('zipalign does not advertise -P; Android build tools with 16 KiB support are required')
+            args = [tool] + (['-P', '16'] if page_size == 16 else ['-p']) + ['4', str(src), str(staged)]
+        else:
+            if not keystore or not alias or not pass_env:
+                raise ValueError('sign requires --keystore, --alias and --pass-env (environment variable name)')
+            import os
+            if pass_env not in os.environ: raise ValueError('Signing password environment variable is not set')
+            args = [tool, 'sign', '--ks', keystore, '--ks-key-alias', alias, '--ks-pass', 'env:' + pass_env,
+                    '--out', str(staged), str(src)]
+        if stage == 'jadx':
+            from .jadx import directory_size
+            def monitor():
+                if directory_size(staged) > 512 * 1024 * 1024:
+                    raise RuntimeError('JADX output exceeded the 512 MiB monitored limit')
+            result = run(args, timeout=600, monitor=monitor)
+        else:
+            result = run(args, timeout=600)
+        if result['returncode'] != 0:
+            detail = (result['stderr'] or result['stdout'] or 'No diagnostic output was returned')[:4000]
+            if stage == 'build':
+                raise RuntimeError('apktool build failed: ' + detail + '. Next: inspect apktool diagnostics and versions/frameworks, check decoded resource edits, and retry in a fresh workspace; some APKs cannot be rebuilt unchanged.')
+            raise RuntimeError(toolname + ' failed: ' + detail)
+        if staged.is_symlink() or (not staged.is_dir() if stage in ('decode', 'jadx') else not staged.is_file()):
+            raise RuntimeError(toolname + ' reported success without the expected output type')
+        publish_new(staged, dest, directory=stage in ('decode', 'jadx'))
+        return str(dest), result

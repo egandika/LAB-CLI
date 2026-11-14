@@ -21,7 +21,7 @@ class SplitWorkspaceTests(unittest.TestCase):
         with contextlib.redirect_stdout(out): code = main(list(args))
         return code, json.loads(out.getvalue())
     def init(self):
-        code, r = self.call('splits','init',str(self.workspace),str(self.a),str(self.b)); self.assertEqual(code,0,r)
+        code, r = self.call('splits','init',str(self.workspace),str(self.a),str(self.b)); self.assertEqual(code, 3,r)
     def test_init_copies_files_and_refuses_existing_workspace(self):
         self.init()
         self.assertEqual((self.workspace/'apk-0000/original.apk').read_bytes(),self.a.read_bytes())
@@ -46,7 +46,7 @@ class SplitWorkspaceTests(unittest.TestCase):
         with patch('apklab.cli.perform', side_effect=fake):
             code, _ = self.call('splits','run',str(self.workspace),'sign'); self.assertEqual(code,1); self.assertFalse(calls)
             code, r = self.call('splits','run',str(self.workspace),'sign','--keystore','key.jks','--alias','mykey','--pass-env','PASSWORD_NAME')
-        self.assertEqual(code,0,r); self.assertEqual(calls,[('key.jks','mykey','PASSWORD_NAME')]*2)
+        self.assertEqual(code, 3,r); self.assertEqual(calls,[('key.jks','mykey','PASSWORD_NAME')]*2)
     def test_tampered_copy_and_metadata_are_rejected(self):
         self.init(); (self.workspace/'apk-0000/original.apk').write_bytes(b'changed')
         code, r = self.call('splits','run',str(self.workspace),'decode'); self.assertEqual(code,1,r)

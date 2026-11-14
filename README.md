@@ -16,7 +16,8 @@ APKLab helps inspect Android packages, explore DEX and assets, and prepare modif
 | `setup` | Show a plan or attempt a limited installation through APT. |
 | `inspect` | Check APK ZIPs, native ABIs, metadata, and signatures, including multiple splits. |
 | `xapk` | Inspect, extract, or repack an XAPK without overwriting the original. |
-| `dex` | Index classes, method references, APIs, strings, URLs, and potential models. |
+| `dex` | Index DEX identifiers, manifest permissions/components, and heuristic obfuscation hints. |
+| `jadx` | Decompile a temporary APK copy to a new output directory with monitored limits. |
 | `inventory` | List assets and native libraries; search bounded text and inspect native symbols. |
 | `work` | Create a copy-based workspace for apktool/JADX, rebuilding, alignment, signing, and verification. |
 | `splits` | Apply copy-based workflow stages across multiple APKs. |
@@ -73,13 +74,13 @@ Separate verified results, inferences, failures, and untested items. Do not clai
 ```sh
 apklab doctor
 apklab doctor --check        # run limited version/help probes
-apklab setup                 # show the plan; do not install tools
+apklab setup --plan          # show official sources/checksums; do not install tools
 apklab setup --install       # opt in to attempting installation through APT
 ```
 
 `doctor` searches PATH, `ANDROID_SDK_ROOT`, `ANDROID_HOME`, `~/Android/Sdk`, and `GHIDRA_HOME` for Ghidra. `--check` runs short version/help probes for supported tools and reports unsuccessful or unsupported probes as `not_tested`. Finding an executable or receiving a successful version response **does not prove** full functionality. For example, package metadata requires `aapt` and signature verification requires `apksigner`.
 
-`setup --install` is for Debian/Ubuntu-based systems and modifies the system: it runs `apt-get update`, attempts to install missing packages, and checks for their executables. Review the APT sources and plan first. It requires root or passwordless sudo; failures are reported per package. JADX, the full SDK, the emulator, and Ghidra are not installed automatically.
+`setup --plan` provides official download URLs, SHA-256 comparison instructions, and Debian/Ubuntu, Termux/Android and macOS guidance. SDK tools are not guaranteed to run on Termux. If an upstream digest is unavailable, integrity remains unverified. `setup --install` is for Debian/Ubuntu-based systems and modifies the system: it runs `apt-get update`, attempts to install missing packages, and checks for their executables. Review the APT sources and plan first. It requires root or passwordless sudo; failures are reported per package. JADX, the full SDK, the emulator, and Ghidra are not installed automatically.
 
 If needed, install tools from official sources and verify provided checksums/signatures:
 
@@ -93,6 +94,8 @@ Tool availability depends on the system and network. SDK installation, acceptanc
 
 Activate the virtual environment (`. .venv/bin/activate` on Linux/macOS), or replace `apklab` with the full path to its executable in the virtual environment.
 
+Android tool discovery prefers `PATH`, then Android SDK roots in `ANDROID_SDK_ROOT`, `ANDROID_HOME`, the Windows `LOCALAPPDATA` SDK directory where applicable, and the default user SDK directory. SDK build-tools folders are ordered by numeric version, with stable releases ahead of previews of the same version. On Windows, SDK `.exe`, `.bat`, and `.cmd` launchers are considered; batch invocations reject shell metacharacters in paths and arguments rather than risk shell interpretation. Windows behavior should still be verified on the target machine.
+
 ### Inspect APKs and splits
 
 ```sh
@@ -100,15 +103,16 @@ apklab inspect app.apk
 apklab inspect base.apk split_config.arm64_v8a.apk
 apklab inspect ./split-directory --recursive --device-abi arm64-v8a --report inspection.json
 apklab dex app.apk --search login --limit 50
-apklab inventory app.apk --search lib --native-details --native-symbols
+apklab jadx app.apk ./jadx-output --timeout 600 --max-output-mib 512
+apklab inventory app.apk --search lib --native-details --native-symbols --hash
 apklab inventory app.apk --text 'example.org'
 ```
 
-`inspect` checks ZIP CRCs, native ABI directories, and manifest presence. With `aapt` and `apksigner`, it also reads metadata and verifies signatures. For multiple APKs, available package names, version codes, and certificate digest sets are compared, and duplicate non-empty split names reported by `aapt` are flagged. Unavailable checks are marked `not_tested`; matching digests do not prove that a split set is complete or compatible. Base selection, split dependencies, device compatibility, signer rotation, and installation are not fully validated.
+`inspect`, `dex`, and `inventory` require an APK ZIP with exactly one root manifest and check every entry CRC within the configured ZIP limits. These checks do not validate manifest contents or APK signatures. `inspect` also lists native ABI directories. With `aapt` and `apksigner`, it also reads metadata and verifies signatures. For multiple APKs, available package names, version codes, and certificate digest sets are compared, and duplicate non-empty split names reported by `aapt` are flagged. Unavailable checks are marked `not_tested`; matching digests do not prove that a split set is complete or compatible. Base selection, split dependencies, device compatibility, signer rotation, and installation are not fully validated.
 
 When metadata is available, `inspect` lists APKs without a reported split name as **base candidates**, not confirmed bases. `--device-abi` compares native directory names only; it does not establish compatibility or select the correct splits.
 
-`dex` indexes classes and method references, not runtime behavior or call graphs. URLs and model names are hints, not proof that a server is active or that model definitions are complete. Obfuscation, encrypted strings, dynamic DEX, and native code can hide information. `inventory --native-symbols` uses `readelf`; symbols may be stripped. `--text` searches UTF-8 assets/resources only, skips binary or entries over 1 MiB, reads at most 32 MiB total, and returns at most 200 excerpts. Results may contain sensitive data.
+`dex` indexes classes and method references, not runtime behavior or call graphs. It reads DEX versions 035 and 037–040 and validates indexed ranges and Modified UTF-8, but does not fully validate DEX files, checksums, or executable code; DEX 041 containers are unsupported. With `aapt`, it lists named permissions and components from manifest XML-tree output; truncated stdout is explicitly marked partial and is not presented as a complete manifest; resource references and dynamically registered components can be missed. Short class names and encoded-looking strings are heuristics only and can be false positives. `inventory --hash` streams matching entries, computes SHA-256 and checks ZIP CRC; magic-byte labels are hints, not file validation. URLs and model names are hints, not proof that a server is active or that model definitions are complete. Obfuscation, encrypted strings, dynamic DEX, and native code can hide information. `inventory --native-symbols` uses `readelf`; symbols may be stripped. `--text` searches UTF-8 assets/resources only, skips binary or entries over 1 MiB, reads at most 32 MiB total, and returns at most 200 excerpts. Results may contain sensitive data.
 
 ### Inspect and extract XAPKs
 
@@ -118,18 +122,22 @@ apklab xapk unpack game.xapk ./xapk-copy
 apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 ```
 
+`jadx` copies the input to a temporary directory and creates a new output directory. It stops the tool when the timeout or monitored output-size limit is exceeded and removes that newly created output on failure. Size checks are sampled and **are not a hard disk quota**; output can briefly exceed the limit. The runner terminates the POSIX process group or Windows job on exit, but detached or escaped processes are not guaranteed to be contained; this is not a sandbox. Use OS-level isolation and disk quotas for untrusted APKs. `work jadx` uses the same process runner and a 512 MiB monitored output limit; workspace stages stage their outputs before publication and clean up on failure. Atomic directory publication requires platform support; a cleanup error can leave a staging directory.
+
 `xapk inspect` lists entries; `--verify` reads each file, checks CRC, and computes SHA-256. `unpack` only reads the original archive and copies its contents into a **new** directory, checking CRC and hashes. Path traversal, duplicate or colliding paths, symlinks, special files, encrypted entries, and size-limit violations are rejected.
 
-APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. This does not validate manifest completeness, all APK contents, or OBB compatibility. If the manifest reports a failure after extraction, the copied directory may remain.
+APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. This does not validate manifest completeness, all APK contents, or OBB compatibility. Unpack and repack stage their outputs and validate supported manifest references before publishing; a manifest failure prevents publication. Unsupported manifest formats remain untested.
 
 To create a **new** XAPK and replace selected APK entries with copies you have rebuilt and signed:
 
 ```sh
 apklab xapk repack game.xapk ./modified.xapk --replace base.apk=/path/to/signed-base.apk
 apklab xapk inspect ./modified.xapk --verify
+# Or produce an archive plus a validated OBB directory layout:
+apklab xapk repack game.xapk ./new-output --directory --replace base.apk=/path/to/signed-base.apk
 ```
 
-Repeat `--replace ENTRY=APK` for other APKs. Source paths are read-only, replacements must be ZIPs containing `AndroidManifest.xml`, and ZIP CRCs are checked. OBB and other entries are copied unchanged. The manifest is **not rewritten**; version, size or checksum fields may be stale. Signature compatibility, OBB compatibility, installer support, device-specific split selection, and app behavior are not verified.
+Repeat `--replace ENTRY=APK` for other APKs. Source paths are read-only, replacements must be ZIPs containing `AndroidManifest.xml`, and ZIP CRCs are checked. OBB and other entries are copied unchanged. The manifest is **not rewritten**; version, size or checksum fields may be stale. In `--directory` mode the new directory contains `repacked.xapk` and copies of declared OBBs under `Android/obb/PACKAGE/`. It requires a supported `package_name` and `expansions` list, validates OBB filename, location, and a one-to-one match with archive entries, and rejects unsupported, missing or undeclared OBBs. This validates placement only, not OBB contents or compatibility. Signature compatibility, installer support, device-specific split selection, and app behavior are not verified.
 
 Default APK limits are 100,000 entries, 64 MiB per entry, and 512 MiB total uncompressed. For XAPK, the default size limits are 2,048 MiB per entry and 8,192 MiB total. Adjust them deliberately with `--max-entry-mib` and `--max-total-mib`; higher limits may use substantial memory, CPU, and disk space. CRC is not a substitute for signature verification. `.apks` containers are not extracted automatically.
 
@@ -149,9 +157,9 @@ apklab inspect ./apklab-work-example/signed.apk
 
 The workspace must be new; `original.apk` is a copy. Stages use separately installed `apktool`, `jadx`, `zipalign`, and `apksigner`. `work jadx` writes decompiled Java into a new workspace directory; its output is for analysis, not a rebuildable source project. Outputs must be new and inside the workspace; `--input` and `--output` can change paths within it. Set the password in an environment variable using a secure local method, not in commands, reports, or Git. Separate key passwords and hardware tokens are not supported.
 
-`--page-size 16` requires a `zipalign` version advertising `-P` support, such as Android build tools 35.0.0 or later. It aligns/checks uncompressed native libraries in the ZIP; it **does not verify ELF load-segment alignment**, overall 16 KiB device compatibility, or runtime behavior. The default is 4 KiB. `work verify` also invokes `apksigner verify`; missing tools or unsupported 16 KiB checks are `not_tested`, so exit code 0 does not mean both checks ran.
+`work align --page-size 16` requires a `zipalign` version advertising `-P` support, such as Android build tools 35.0.0 or later. It aligns uncompressed native libraries in the ZIP; it **does not verify ELF load-segment alignment**, overall 16 KiB device compatibility, or runtime behavior. Alignment defaults to 4 KiB. `work verify` independently runs both 4 KiB and 16 KiB ZIP checks plus `apksigner verify`; a missing tool or unsupported 16 KiB check is `not_tested`. The verification `--page-size` option is retained for compatibility but both checks run regardless.
 
-Test installation and behavior only on an authorized, isolated device or emulator. A different signing key may prevent updates to the original app or affect integrations. Not every APK can be rebuilt unchanged with apktool.
+Test installation and behavior only on an authorized, isolated device or emulator. A different signing key may prevent updates to the original app or affect integrations. Not every APK can be rebuilt unchanged with apktool; failed builds report available tool diagnostics and suggest reviewing versions, frameworks, and resource edits.
 
 ### Split workspaces
 
@@ -183,9 +191,19 @@ For split sets, supply the base and all required split APK paths. The command re
 
 ### Reports
 
-All output is JSON. Exit code `1` indicates a reported failure; `0` means no failures were reported, **not** that every check ran. `--report FILE` only creates a new file and does not overwrite an existing one. For `work` and `xapk`, place `--report` after the command name and before the subcommand.
+Output is JSON by default. Add `--summary` to print a human-readable count and reasons for untested entries above the JSON; counts refer to report entries, not unique underlying tests. `--report FILE` always writes JSON only, creates a new file, and does not overwrite an existing one. For `work` and `xapk`, place `--report` after the command name and before the subcommand.
 
-Reports may contain sensitive strings, endpoints, or paths. Review and redact them before sharing. Do not put APKs/XAPKs, OBBs, extracted data, keystores, credentials, or personal data in Git; `.gitignore` is a safeguard, not a guarantee.
+Exit statuses are **0** (no failures or untested entries), **1** (one or more failures, taking precedence), **3** (no failures but one or more untested entries), and **2** for argument parsing errors. Status 3 is expected for many commands, including `doctor` and verification, because limitations remain. Shell scripts and CI must explicitly handle it; 0 still does not prove functionality beyond the stated checks.
+
+Reports may contain sensitive strings, endpoints, or paths. Prefer output outside the checkout; example output directories and `apklab-report*.json` are ignored as a safeguard, not a guarantee. Review and redact reports before sharing. Do not put APKs/XAPKs, OBBs, extracted data, keystores, credentials, or personal data in Git; `.gitignore` is a safeguard, not a guarantee.
+
+## Limitations
+
+- Static metadata, DEX strings, short names, magic bytes, and decompiled code are observations or heuristics, not proof of behavior, permissions in use, security, or compatibility. Some data is intentionally capped or untested.
+- Split dependency completeness, signer rotation, automatic split selection, and actual installation remain unverified by static checks; split rebuild stages may partially succeed. XAPK OBB placement validation supports only the documented manifest schema and does not verify OBB contents or installer behavior.
+- ZIP 16 KiB alignment is not an ELF segment alignment or runtime compatibility check. Rebuilt or re-signed APKs may not install, update, or work. A launcher event does not establish application functionality.
+- JADX's monitored output cap is best effort, not a sandbox or hard quota. Use a disposable isolated environment for untrusted code and tools; never run APKs on a production device.
+- Reports may contain sensitive data. CRC and hashes do not authenticate an APK; signatures do not establish trust or application safety.
 
 ## Server limitations and testing
 
@@ -197,7 +215,7 @@ Run automated tests with:
 python3 -m unittest discover -s tests -v
 ```
 
-Most tests use synthetic APK/DEX files and mocks for metadata, signing, and external-tool workflows; the native test also uses system `readelf` when available. An opt-in integration test uses real Java, `keytool`, `apktool`, `aapt`, `zipalign`, and `apksigner` with an authorized test APK. It creates a temporary test keystore, decodes, rebuilds, aligns, signs, and verifies a copy; it does not install or launch the APK:
+Most tests use synthetic APK/DEX files and mocks for metadata, signing, and external-tool workflows; the native test also uses system `readelf` when available. An opt-in integration test uses real Java, `keytool`, `apktool`, `aapt`, `zipalign`, and `apksigner` with an authorized test APK. It creates a temporary test keystore, decodes, rebuilds, aligns, signs, and verifies a copy; it does not install or launch the APK unless the emulator option is set:
 
 ```sh
 APKLAB_INTEGRATION_APK=/path/to/authorized-test.apk python3 -m unittest discover -s tests -p test_integration.py -v

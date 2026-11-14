@@ -38,7 +38,7 @@ class DeviceTests(unittest.TestCase):
     def test_emulator_install_and_launch(self):
         with patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=self.fake_run):
             code, r = self.call('device','--serial','emulator-5554','--confirm-install','--launch',str(self.apk))
-        self.assertEqual(code, 0, r); self.assertEqual(r['package'], 'org.example.app')
+        self.assertEqual(code, 3, r); self.assertEqual(r['package'], 'org.example.app')
         self.assertTrue(any('install' in c for c in self.calls)); self.assertTrue(any('monkey' in c for c in self.calls))
         self.assertEqual(self.apk.read_bytes(), self.before)
         self.assertTrue(any(x['subject']=='runtime' for x in r['not_tested']))

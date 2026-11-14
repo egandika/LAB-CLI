@@ -99,12 +99,14 @@ def unpack(path, destination, max_entry, max_total):
                     with target.open('xb') as out:
                         item['sha256'] = stream_entry(z, info, out)
             return items
-        except BaseException:
-            shutil.rmtree(dest)
+        except BaseException as original:
+            try: shutil.rmtree(dest)
+            except OSError as cleanup:
+                raise RuntimeError(str(original) + '; cleanup failed: ' + str(cleanup)) from original
             raise
 
 
-def manifest_info(path, entries):
+def manifest_info(path, entries, directory=False):
     """Compare the optional APKPure-style split_apks list, not trust it as truth."""
     item = next((i for i in entries if i['path'] == 'manifest.json' and i['kind'] == 'other'), None)
     if not item:
@@ -112,8 +114,11 @@ def manifest_info(path, entries):
     if item['size'] > MIB:
         return {'status': 'unsupported', 'reason': 'manifest.json exceeds 1 MiB'}
     try:
-        with zipfile.ZipFile(path) as z:
-            data = json.loads(z.read('manifest.json').decode('utf-8'))
+        if directory:
+            data = json.loads((Path(path) / 'manifest.json').read_bytes().decode('utf-8'))
+        else:
+            with zipfile.ZipFile(path) as z:
+                data = json.loads(z.read('manifest.json').decode('utf-8'))
     except (UnicodeError, ValueError, zipfile.BadZipFile, RuntimeError) as e:
         return {'status': 'invalid', 'reason': str(e)}
     if not isinstance(data, dict):
@@ -134,7 +139,7 @@ def manifest_info(path, entries):
 def repack(path, destination, replacements, max_entry, max_total):
     """Copy a validated archive into a new XAPK, optionally replacing APK entries."""
     import copy
-    from .core import zip_infos
+    from .core import zip_infos, check_zip_crc
     dest = Path(destination)
     with zipfile.ZipFile(path) as source:
         infos = validate(source, max_entry, max_total)
@@ -151,7 +156,7 @@ def repack(path, destination, replacements, max_entry, max_total):
                 apk_infos = zip_infos(apk, max_entry, max_total)
                 if 'AndroidManifest.xml' not in {i.filename for i in apk_infos}:
                     raise ValueError('Replacement has no AndroidManifest.xml: ' + str(p))
-                bad = apk.testzip()
+                bad = check_zip_crc(apk, apk_infos)
                 if bad: raise ValueError('Replacement APK failed CRC: ' + bad)
         total = sum(Path(replacements[i.filename]).stat().st_size if i.filename in replacements else i.file_size for i in infos)
         if total > max_total: raise ValueError('Repacked archive exceeds total size limit')
@@ -182,8 +187,68 @@ def repack(path, destination, replacements, max_entry, max_total):
                                     if size != new_info.file_size: raise ValueError('Replacement size changed during repack')
                                     item.update(size=size, sha256=digest.hexdigest(), replaced=True)
                 return items
-            except BaseException:
+            except BaseException as original:
                 # Only a file created exclusively by this operation can be removed.
-                out_file.close()
-                dest.unlink(missing_ok=True)
+                try:
+                    out_file.close()
+                    dest.unlink(missing_ok=True)
+                except OSError as cleanup:
+                    raise RuntimeError(str(original) + '; cleanup failed: ' + str(cleanup)) from original
                 raise
+
+
+def obb_layout(path, infos):
+    """Validate the supported APKPure-style package_name/expansions layout."""
+    names = {i.filename for i in infos if not i.is_dir()}
+    obbs = {n for n in names if n.lower().endswith('.obb')}
+    manifest = next((i for i in infos if i.filename == 'manifest.json' and not i.is_dir()), None)
+    if not manifest or manifest.file_size > MIB:
+        raise ValueError('A supported manifest.json is required for validated OBB placement')
+    with zipfile.ZipFile(path) as z:
+        data = json.loads(z.read(manifest).decode('utf-8'))
+    if not isinstance(data, dict): raise ValueError('manifest.json must be an object')
+    package = data.get('package_name')
+    if not isinstance(package, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+', package):
+        raise ValueError('Manifest package_name is missing or invalid')
+    expansions = data.get('expansions')
+    if not isinstance(expansions, list): raise ValueError('Manifest expansions must be a list')
+    mapping = {}
+    targets = set()
+    for item in expansions:
+        if not isinstance(item, dict) or not isinstance(item.get('file'), str) or not isinstance(item.get('install_location'), str):
+            raise ValueError('Manifest expansion requires file and install_location strings')
+        file, location = item['file'], item['install_location']
+        expected_location = 'Android/obb/' + package
+        if location.rstrip('/') != expected_location or not re.fullmatch(r'(?:main|patch)\.[0-9]+\.' + re.escape(package) + r'\.obb', file):
+            raise ValueError('Manifest expansion has invalid OBB filename or placement')
+        target = expected_location + '/' + file
+        candidates = [name for name in (file, target) if name in obbs]
+        if len(candidates) != 1 or target in targets: raise ValueError('Missing, ambiguous or duplicate OBB expansion: ' + file)
+        mapping[candidates[0]] = target
+        targets.add(target)
+    if set(mapping) != obbs: raise ValueError('Archive contains OBB files not declared by supported manifest expansions')
+    return mapping
+
+
+def repack_directory(path, destination, replacements, max_entry, max_total):
+    """Create a directory with new archive and strictly manifest-validated OBB layout."""
+    with zipfile.ZipFile(path) as z:
+        infos = validate(z, max_entry, max_total)
+        mapping = obb_layout(path, infos)
+    dest = Path(destination)
+    dest.mkdir(exist_ok=False)
+    try:
+        items = repack(path, dest/'repacked.xapk', replacements, max_entry, max_total)
+        with zipfile.ZipFile(path) as z:
+            infos = validate(z, max_entry, max_total)
+            by_name = {i.filename: i for i in infos}
+            for source, target in mapping.items():
+                output = dest.joinpath(*target.split('/'))
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with output.open('xb') as out: stream_entry(z, by_name[source], out)
+        return items
+    except BaseException as original:
+        try: shutil.rmtree(dest)
+        except OSError as cleanup:
+            raise RuntimeError(str(original) + '; cleanup failed: ' + str(cleanup)) from original
+        raise

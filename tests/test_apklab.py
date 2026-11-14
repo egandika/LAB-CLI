@@ -55,8 +55,9 @@ class Tests(unittest.TestCase):
         self.assertEqual(d['classes'], ['Lcom/example/model/User;'])
         self.assertEqual(d['methods'], ['Lcom/example/model/User;->load()V'])
         self.assertEqual(d['endpoints'], ['https://example.org/api'])
-        code, result = self.call('dex', str(self.apk))
-        self.assertEqual(code, 0); self.assertEqual(result['dex_files'][0]['counts']['methods'], 1)
+        with patch('apklab.cli.find_tool', return_value=None):
+            code, result = self.call('dex', str(self.apk))
+        self.assertEqual(code, 3); self.assertEqual(result['dex_files'][0]['counts']['methods'], 1)
         self.assertTrue(result['inferences']); self.assertTrue(result['not_tested'])
     def test_invalid_dex(self):
         with self.assertRaises(ValueError): read_dex(b'dex\n035\0')
@@ -65,7 +66,7 @@ class Tests(unittest.TestCase):
     def test_inspect_and_splits(self):
         with patch('apklab.core.find_tool', return_value=None):
             code, r = self.call('inspect', str(self.apk), str(self.apk))
-        self.assertEqual(code, 0); self.assertEqual(r['apks'][0]['architectures'], ['arm64-v8a'])
+        self.assertEqual(code, 3); self.assertEqual(r['apks'][0]['architectures'], ['arm64-v8a'])
         self.assertIsNone(r['apks'][0]['package']); self.assertTrue(r['not_tested'])
     def test_metadata_and_signature_tools(self):
         def find(t): return '/tool/' + t if t in ('aapt', 'apksigner') else None
@@ -74,7 +75,7 @@ class Tests(unittest.TestCase):
             return {'returncode': 0, 'stdout': text, 'stderr': ''}
         with patch('apklab.core.find_tool', side_effect=find), patch('apklab.core.run', side_effect=run):
             code, r = self.call('inspect', str(self.apk))
-        self.assertEqual(code, 0); self.assertEqual(r['apks'][0]['package'], 'com.example')
+        self.assertEqual(code, 3); self.assertEqual(r['apks'][0]['package'], 'com.example')
         self.assertTrue(any('signature' not in x['detail'].lower() and 'apksigner' in x['detail'] for x in r['verified']))
     def test_bad_zip_and_missing_manifest(self):
         p = self.root/'bad.apk'; p.write_bytes(b'garbage')
@@ -83,7 +84,7 @@ class Tests(unittest.TestCase):
         code, r = self.call('inspect', str(p)); self.assertEqual(code, 1)
     def test_inventory(self):
         code, r = self.call('inventory', str(self.apk), '--search', 'arm64')
-        self.assertEqual(code, 0); self.assertEqual(len(r['files']), 1)
+        self.assertEqual(code, 3); self.assertEqual(len(r['files']), 1)
         code, r = self.call('inventory', str(self.apk), '--native-details')
         if os.system('command -v readelf >/dev/null 2>&1') == 0:
             self.assertEqual(code, 1); self.assertTrue(r['failures'])
@@ -101,9 +102,10 @@ class Tests(unittest.TestCase):
             self.skipTest('readelf or /bin/true unavailable')
         p = self.root/'native.apk'
         with zipfile.ZipFile(p, 'w') as z:
+            z.writestr('AndroidManifest.xml', 'fixture')
             z.writestr('lib/test/libtest.so', Path('/bin/true').read_bytes())
         code, r = self.call('inventory', str(p), '--native-details')
-        self.assertEqual(code, 0); self.assertIn('ELF Header', r['files'][0]['readelf'])
+        self.assertEqual(code, 3); self.assertIn('ELF Header', r['files'][0]['readelf'])
     def test_workspace_immutability(self):
         before = hashlib.sha256(self.apk.read_bytes()).hexdigest(); workspace = self.root/'work'
         code, r = self.call('work', 'init', str(self.apk), str(workspace)); self.assertEqual(code, 0)
@@ -122,15 +124,15 @@ class Tests(unittest.TestCase):
             return {'returncode': 0, 'stdout': '', 'stderr': ''}
         with patch('apklab.workflow.find_tool', return_value='/fake/tool'), patch('apklab.workflow.run', side_effect=run), patch.dict(os.environ, {'TEST_PASS': 'secret'}):
             for stage in ('decode', 'build', 'align'):
-                code, r = self.call('work', stage, str(workspace)); self.assertEqual(code, 0, r)
+                code, r = self.call('work', stage, str(workspace)); self.assertEqual(code, 3, r)
             code, r = self.call('work', 'sign', str(workspace), '--keystore', 'test.jks', '--alias', 'test', '--pass-env', 'TEST_PASS')
-            self.assertEqual(code, 0); self.assertNotIn('secret', json.dumps(r))
+            self.assertEqual(code, 3); self.assertNotIn('secret', json.dumps(r))
             code, r = self.call('work', 'decode', str(workspace)); self.assertEqual(code, 1)
     def test_report_no_overwrite(self):
         before = self.apk.read_bytes()
         code, _ = self.call('doctor', '--report', str(self.apk))
         self.assertEqual(code, 1); self.assertEqual(before, self.apk.read_bytes())
     def test_setup_plan(self):
-        code, r = self.call('setup'); self.assertEqual(code, 0); self.assertTrue(r['plan']); self.assertTrue(r['not_tested'])
+        code, r = self.call('setup'); self.assertEqual(code, 3); self.assertTrue(r['plan']); self.assertTrue(r['not_tested'])
 
 if __name__ == '__main__': unittest.main()
