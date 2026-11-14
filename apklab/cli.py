@@ -6,7 +6,7 @@ import zipfile
 import zlib
 from pathlib import Path
 from . import __version__
-from .core import TOOLS, PartialReportError, add, emit, find_tool, inspect_one, reported, report, run, validate_apk_archive, zip_infos
+from .core import TOOLS, PartialReportError, add, emit, find_tool, inspect_one, reported, report, run, validate_apk_archive
 from .dex import read_dex
 from .workflow import init, perform, workspace_input, supports_16k
 from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, repack as repack_xapk, repack_directory, manifest_info

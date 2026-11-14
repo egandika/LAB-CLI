@@ -139,7 +139,7 @@ def manifest_info(path, entries, directory=False):
 def repack(path, destination, replacements, max_entry, max_total):
     """Copy a validated archive into a new XAPK, optionally replacing APK entries."""
     import copy
-    from .core import zip_infos, check_zip_crc
+    from .core import validate_apk_archive
     dest = Path(destination)
     with zipfile.ZipFile(path) as source:
         infos = validate(source, max_entry, max_total)
@@ -153,11 +153,10 @@ def repack(path, destination, replacements, max_entry, max_total):
             if not p.is_file() or p.suffix.lower() != '.apk':
                 raise ValueError('Replacement must be an APK file: ' + str(p))
             with zipfile.ZipFile(p) as apk:
-                apk_infos = zip_infos(apk, max_entry, max_total)
-                if 'AndroidManifest.xml' not in {i.filename for i in apk_infos}:
-                    raise ValueError('Replacement has no AndroidManifest.xml: ' + str(p))
-                bad = check_zip_crc(apk, apk_infos)
-                if bad: raise ValueError('Replacement APK failed CRC: ' + bad)
+                try:
+                    validate_apk_archive(p, apk, max_entry, max_total)
+                except ValueError as exc:
+                    raise ValueError('Replacement APK: ' + str(exc)) from exc
         total = sum(Path(replacements[i.filename]).stat().st_size if i.filename in replacements else i.file_size for i in infos)
         if total > max_total: raise ValueError('Repacked archive exceeds total size limit')
         if any(Path(p).stat().st_size > max_entry for p in replacements.values()):
