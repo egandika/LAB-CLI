@@ -94,7 +94,7 @@ Tool availability depends on the system and network. SDK installation, acceptanc
 
 Activate the virtual environment (`. .venv/bin/activate` on Linux/macOS), or replace `apklab` with the full path to its executable in the virtual environment.
 
-Android tool discovery prefers `PATH`, then Android SDK roots in `ANDROID_SDK_ROOT`, `ANDROID_HOME`, the Windows `LOCALAPPDATA` SDK directory where applicable, and the default user SDK directory. SDK build-tools folders are ordered by numeric version, with stable releases ahead of previews of the same version. On Windows, SDK `.exe`, `.bat`, and `.cmd` launchers are considered; batch invocations reject shell metacharacters in paths and arguments rather than risk shell interpretation. Windows behavior should still be verified on the target machine.
+Android tool discovery prefers `PATH`, then Android SDK roots in `ANDROID_SDK_ROOT`, `ANDROID_HOME`, the Windows `LOCALAPPDATA` SDK directory where applicable, and the default user SDK directory. SDK build-tools folders are ordered by numeric version, with stable releases ahead of previews of the same version. On Windows, SDK `.exe`, `.bat`, and `.cmd` launchers are considered; batch invocations reject shell metacharacters in paths and arguments rather than risk shell interpretation. Windows SDK and batch argument handling have synthetic/mock coverage; native Windows behavior should still be verified on the target machine. `setup --install` requires a POSIX APT host and fails safely on unsupported platforms.
 
 ### Inspect APKs and splits
 

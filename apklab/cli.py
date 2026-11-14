@@ -78,7 +78,11 @@ def setup(args):
         add(r, 'failures', 'setup', 'apt-get not available; install tools manually')
         return r
     prefix = []
-    if os.geteuid() != 0:
+    geteuid = getattr(os, 'geteuid', None)
+    if geteuid is None:
+        add(r, 'failures', 'setup', 'APT installation requires a supported POSIX host; use setup --plan for manual platform guidance')
+        return r
+    if geteuid() != 0:
         sudo = find_executable('sudo')
         if not sudo or run([sudo, '-n', 'true'])['returncode'] != 0:
             add(r, 'failures', 'setup', 'Root or passwordless sudo required; no password requested')
