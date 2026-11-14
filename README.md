@@ -158,7 +158,7 @@ Most tests use synthetic APK/DEX files and mocks for metadata, signing, and exte
 APKLAB_INTEGRATION_APK=/path/to/authorized-test.apk python3 -m unittest discover -s tests -p test_integration.py -v
 ```
 
-Without `APKLAB_INTEGRATION_APK`, this test is skipped. When explicitly enabled, it fails if required tools are missing. The GitHub Actions workflow is configured to run unit tests across Python versions and operating systems, plus the real-tool integration test on Linux using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. Check the actual workflow results before claiming CI passed. The real-tool round trip and device/emulator tests have not yet been verified in the initial environment.
+Without `APKLAB_INTEGRATION_APK`, this test is skipped. When explicitly enabled, it fails if required tools are missing. The GitHub Actions workflow runs unit tests across Python versions and operating systems, plus the real-tool integration test on Linux using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. The real-tool round trip has passed in CI on Linux; check the current workflow results for the latest status. Device/emulator installation and runtime behavior have not been tested.
 
 ## License
 
