@@ -104,6 +104,16 @@ class XapkTests(unittest.TestCase):
     def test_xapk_is_not_apk(self):
         code, r = self.call('inspect', str(self.source))
         self.assertEqual(code, 1); self.assertIn('XAPK is an archive', r['failures'][0]['detail'])
+    def test_duplicate_split_names(self):
+        second = self.root/'second.apk'; second.write_bytes(self.apk.read_bytes())
+        def fake_run(args, timeout=120):
+            return {'returncode': 0, 'stdout': "package: name='org.example' versionCode='1' split='config.arm64'", 'stderr': ''}
+        with patch('apklab.core.find_tool', side_effect=lambda name: '/aapt' if name == 'aapt' else None), patch('apklab.core.run', side_effect=fake_run):
+            code, r = self.call('inspect', str(self.apk), str(second))
+        self.assertEqual(code, 1)
+        self.assertTrue(any('Duplicate non-empty split names' in x['detail'] for x in r['failures']))
+        self.assertEqual(r['apks'][0]['split'], 'config.arm64')
+
     def test_split_digest_mismatch_and_missing(self):
         from apklab import core
         def fake_run(args, timeout=120):
