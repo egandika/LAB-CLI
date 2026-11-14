@@ -18,7 +18,7 @@ class ProbeAndVerifyTests(unittest.TestCase):
         with zipfile.ZipFile(self.apk, 'w') as z: z.writestr('AndroidManifest.xml', 'test')
         self.workspace = self.root / 'work'
         self.call('work', 'init', str(self.apk), str(self.workspace))
-        (self.workspace / 'signed.apk').write_bytes(b'not-a-real-apk')
+        (self.workspace / 'signed.apk').write_bytes(self.apk.read_bytes())
 
     def call(self, *args):
         out = io.StringIO()

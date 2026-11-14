@@ -393,7 +393,30 @@ def work(args, _report):
                 add(r, 'verified', label, 'ZIP verification command succeeded for ' + str(src))
             else:
                 add(r, 'failures', label, 'Verification command failed: ' + (result['stderr'] or result['stdout'])[:2000])
-        add(r, 'not_tested', 'runtime', 'Installability, ELF segment alignment, signature identity compatibility, and app behavior are not verified')
+        from .elf import load_alignment, UnsupportedElf
+        r['elf_16k'] = []
+        try:
+            with zipfile.ZipFile(src) as z:
+                infos = validate_apk_archive(src, z)
+                for index, info in enumerate(infos):
+                    if not (info.filename.startswith('lib/') and info.filename.endswith('.so') and not info.is_dir()): continue
+                    item = {'file': info.filename, 'zip_entry_index': index}
+                    r['elf_16k'].append(item)
+                    try:
+                        item.update(load_alignment(z.read(info)))
+                        if item['aligned_16k']:
+                            add(r, 'verified', info.filename, 'ELF LOAD p_align and offset/address congruence meet 16 KiB checks')
+                        else:
+                            add(r, 'failures', info.filename, 'ELF LOAD segment does not meet 16 KiB alignment checks')
+                    except UnsupportedElf as exc:
+                        item.update(status='not_tested', reason=str(exc))
+                        add(r, 'not_tested', info.filename, str(exc))
+                    except (ValueError, zipfile.BadZipFile) as exc:
+                        item.update(status='failure', reason=str(exc))
+                        add(r, 'failures', info.filename, 'ELF inspection: ' + str(exc))
+        except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+            add(r, 'failures', 'ELF inspection', 'Could not inspect APK libraries: ' + str(exc))
+        add(r, 'not_tested', 'runtime', 'Installability, ELF runtime compatibility, signature identity compatibility, and app behavior are not verified')
     else:
         dest, result = perform(args.stage, args.workspace, args.input, args.output_path,
                                getattr(args, 'keystore', None), getattr(args, 'alias', None), getattr(args, 'pass_env', None),

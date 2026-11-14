@@ -20,7 +20,8 @@ class AdvancedTests(unittest.TestCase):
         self.work = self.root/'work'
         self.call('work', 'init', str(self.apk), str(self.work))
         (self.work/'rebuilt.apk').write_bytes(self.apk.read_bytes())
-        (self.work/'signed.apk').write_bytes(self.apk.read_bytes())
+        # These ZIP-verification tests do not exercise ELF parsing.
+        with zipfile.ZipFile(self.work/'signed.apk', 'w') as z: z.writestr('AndroidManifest.xml', 'fixture')
 
     def call(self, *args):
         out = io.StringIO()
@@ -32,7 +33,7 @@ class AdvancedTests(unittest.TestCase):
         def fake_run(args, timeout=120):
             calls.append([str(a) for a in args])
             if '-h' in args: return {'returncode': 0, 'stdout': '  -P <pagesize_kb>', 'stderr': ''}
-            if '-c' not in args: Path(args[-1]).write_bytes(b'aligned')
+            if '-P' in args and '-c' not in args: Path(args[-1]).write_bytes(b'aligned')
             return {'returncode': 0, 'stdout': '', 'stderr': ''}
         with patch('apklab.workflow.find_tool', return_value='/tool/zipalign'), patch('apklab.workflow.run', side_effect=fake_run):
             code, r = self.call('work', 'align', str(self.work), '--page-size', '16')
