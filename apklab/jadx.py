@@ -19,7 +19,7 @@ def directory_size(root):
     return size
 
 
-def decompile(apk, destination, timeout, max_bytes):
+def decompile(apk, destination, timeout, max_bytes, *, include_diagnostics=False):
     if timeout < 1 or max_bytes < 1: raise ValueError('Timeout and size limit must be positive')
     tool = find_tool('jadx')
     if not tool: raise ValueError('jadx not found; run apklab doctor')
@@ -36,10 +36,16 @@ def decompile(apk, destination, timeout, max_bytes):
                 if directory_size(staged) > max_bytes: raise RuntimeError('JADX output exceeded size limit')
             result = run([tool, '--no-res', '-d', str(staged.resolve()), str(copied)], timeout=timeout, monitor=monitor)
             if result['returncode'] != 0:
-                raise RuntimeError('JADX failed: ' + (result['stderr'] or result['stdout'] or str(result['returncode']))[:4000])
+                using_stderr = bool(result['stderr'])
+                detail = result['stderr'] or result['stdout'] or str(result['returncode'])
+                truncated = len(detail) > 4000 or result.get('stderr_truncated' if using_stderr else 'stdout_truncated', False)
+                raise RuntimeError('JADX failed: ' + detail[:4000] + (' [diagnostic truncated]' if truncated else ''))
             if staged.is_symlink() or not staged.is_dir():
                 raise RuntimeError('JADX reported success without a regular output directory')
             size = directory_size(staged)
             if size > max_bytes: raise RuntimeError('JADX output exceeded size limit')
             publish_new(staged, dest, directory=True)
-            return size
+            diagnostic = result.get('stderr', '')
+            details = {'stderr': diagnostic[:4000],
+                       'stderr_truncated': len(diagnostic) > 4000 or bool(result.get('stderr_truncated'))}
+            return (size, details) if include_diagnostics else size

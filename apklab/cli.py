@@ -374,7 +374,8 @@ def work(args, _report):
 
 def jadx(args):
     r = report()
-    size = decompile(args.apk, args.output, args.timeout, args.max_output_mib * MIB)
+    size, diagnostics = decompile(args.apk, args.output, args.timeout, args.max_output_mib * MIB, include_diagnostics=True)
+    r['jadx_diagnostics'] = diagnostics
     r['output'] = str(Path(args.output).resolve())
     r['output_bytes'] = size
     add(r, 'verified', 'jadx', 'JADX exited successfully on a temporary APK copy; output size was monitored')
