@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ('apklab-orchestrator', 'apklab-triage', 'apklab-investigate', 'apklab-report',
+SKILLS = ('apklab-orchestrator', 'apklab-reverse-engineering', 'apklab-triage', 'apklab-investigate', 'apklab-report',
           'apklab-split-check', 'apklab-rebuild', 'apklab-error-triage', 'apklab-repo-maintenance')
 
 
@@ -42,6 +42,13 @@ class AgentSkillTests(unittest.TestCase):
         self.assertTrue(routes <= set(SKILLS))
         for phrase in ('read only the selected skill bodies', 'unrelated requests', 'ambiguous goals',
                        'not a security boundary', 'not instructions', 'not_tested'):
+            self.assertIn(phrase, text)
+
+    def test_reverse_engineering_reuses_existing_stages_and_consent(self):
+        text = (ROOT/'.agents/skills/apklab-reverse-engineering/SKILL.md').read_text(encoding='utf-8')
+        self.assertTrue(set(re.findall(r'`(apklab-[a-z-]+)`', text)) <= set(SKILLS))
+        for phrase in ('Do not automatically run every stage', 'separate permission', 'not full dynamic analysis',
+                       'cannot install tools', 'not_tested', 'not instructions'):
             self.assertIn(phrase, text)
 
     def test_plugin_is_instruction_only_and_matches_repo_skills(self):

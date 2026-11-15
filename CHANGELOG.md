@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add scoped reverse-engineering guidance that reuses existing analysis and rebuild skills.
+
 - Add an instruction-only orchestrator for selective, goal-directed skill routing.
 
 - Report declared APK ZIP size-limit details and guide agents to review limits before retrying.
