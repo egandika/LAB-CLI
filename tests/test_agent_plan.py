@@ -58,13 +58,15 @@ class AgentPlanTests(unittest.TestCase):
         self.assertEqual(plan('rebuild', 'xapk')[0]['command'], 'xapk unpack')
         self.assertEqual(plan('review', 'diff')[0]['type'], 'guidance')
         self.assertEqual(recommended_skills('black-box', 'apk')[0], 'apklab-black-box-testing')
+        self.assertEqual(plan('fuzz', 'parser')[0]['command'], 'fuzz')
         self.assertIn('synthetic AXML/DEX/ZIP', plan('fuzz', 'parser')[0]['purpose'])
+        self.assertEqual(plan('black-box', 'apk')[0]['command'], 'device')
         code, report = self.call('--goal', 'compare', '--kind', 'xapk')
         self.assertEqual(code, 1)
         self.assertIn('Unsupported', report['failures'][0]['detail'])
 
     def test_guidance_is_not_a_fake_executable_command(self):
-        for goal in ('report', 'diagnose', 'review', 'test', 'maintain', 'black-box', 'fuzz'):
+        for goal in ('report', 'diagnose', 'review', 'test', 'maintain'):
             with self.subTest(goal=goal):
                 kind = {'report': 'report', 'diagnose': 'report', 'review': 'diff',
                         'test': 'source', 'maintain': 'repo', 'black-box': 'apk', 'fuzz': 'parser'}[goal]
@@ -124,20 +126,26 @@ class AgentPlanTests(unittest.TestCase):
         self.assertEqual(result['agent_plan']['steps'][0]['command'], 'work init')
         self.assertEqual(result['agent_plan']['recommended_skills'], ['apklab-rebuild', 'apklab-report'])
 
-    def test_advanced_methods_are_guidance_only_and_keep_their_limits(self):
-        for goal, kind, skill in (('black-box', 'apk', 'apklab-black-box-testing'),
-                                  ('black-box', 'splits', 'apklab-black-box-testing'),
-                                  ('fuzz', 'parser', 'apklab-fuzzing')):
+    def test_advanced_methods_name_real_commands_and_keep_their_limits(self):
+        for goal, kind, skill, command in (
+                ('black-box', 'apk', 'apklab-black-box-testing', 'device'),
+                ('black-box', 'splits', 'apklab-black-box-testing', 'inspect'),
+                ('fuzz', 'parser', 'apklab-fuzzing', 'fuzz')):
             with self.subTest(goal=goal, kind=kind):
                 code, result = self.call('--goal', goal, '--kind', kind)
                 self.assertEqual(code, 3)
                 self.assertEqual(result['agent_plan']['recommended_skills'][0], skill)
-                self.assertEqual(result['agent_plan']['steps'][0]['type'], 'guidance')
-                self.assertIsNone(result['agent_plan']['steps'][0]['command'])
-        blackbox = self.call('--goal', 'black-box', '--kind', 'apk')[1]['agent_plan']['steps'][0]['purpose']
-        self.assertIn('separate install/launch approval', blackbox)
-        fuzz = self.call('--goal', 'fuzz', '--kind', 'parser')[1]['agent_plan']['steps'][0]['purpose']
-        self.assertIn('synthetic AXML/DEX/ZIP only', fuzz)
+                step = result['agent_plan']['steps'][0]
+                self.assertEqual(step['type'], 'command')
+                self.assertEqual(step['command'], command)
+                self.assertTrue(any(item['type'] == 'guidance'
+                                    for item in result['agent_plan']['steps']))
+        blackbox = self.call('--goal', 'black-box', '--kind', 'apk')[1]['agent_plan']['steps']
+        self.assertIn('separate approval', blackbox[0]['purpose'])
+        self.assertIn('does not capture UI', blackbox[1]['purpose'])
+        fuzz = self.call('--goal', 'fuzz', '--kind', 'parser')[1]['agent_plan']['steps']
+        self.assertIn('synthetic AXML/DEX/ZIP', fuzz[0]['purpose'])
+        self.assertIn('not coverage-guided', fuzz[1]['purpose'])
 
 
 if __name__ == '__main__':

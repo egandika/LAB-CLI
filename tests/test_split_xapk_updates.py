@@ -26,7 +26,7 @@ class SplitXapkUpdateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             apk = Path(tmp)/'a.apk'
             with zipfile.ZipFile(apk,'w') as z: z.writestr('AndroidManifest.xml', 'fixture')
-            identity = {'file':str(apk),'package':'a.b','version_code':'1','split':None,'signer_sha256':['a'*64], 'architectures':[]}
+            identity = {'file':str(apk),'package':'a.b','version_code':'1','split':None,'signer_sha256':['a'*64], 'architectures':[], 'entries':1}
             with patch('apklab.cli.inspect_one', return_value=identity), patch('apklab.cli.read_dependencies', return_value={'status':'observed','uses_splits':['feature'], 'is_split_required':True}):
                 code, r = self.call('inspect',str(apk))
             self.assertEqual(code,1); self.assertTrue(any('Missing declared' in x['detail'] for x in r['failures']))

@@ -30,7 +30,7 @@ class SplitWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.a.exists()); self.assertTrue(self.b.exists())
     def test_run_all_and_report_partial_failure(self):
         self.init(); calls = []
-        def fake(stage, folder, source, output, key, alias, env, page):
+        def fake(stage, folder, source, output, key, alias, env, page, max_input_bytes):
             calls.append((stage, folder, key, alias, env, page))
             if folder.endswith('apk-0001'): raise RuntimeError('example failure')
             return folder + '/decoded', {'returncode':0,'stdout':'','stderr':''}
@@ -41,7 +41,7 @@ class SplitWorkspaceTests(unittest.TestCase):
         self.assertTrue(r['not_tested'])
     def test_sign_uses_same_identity_and_requires_parameters(self):
         self.init(); calls=[]
-        def fake(stage, folder, source, output, key, alias, env, page):
+        def fake(stage, folder, source, output, key, alias, env, page, max_input_bytes):
             calls.append((key,alias,env)); return folder+'/signed.apk', {'returncode':0,'stdout':'','stderr':''}
         with patch('apklab.cli.perform', side_effect=fake):
             code, _ = self.call('splits','run',str(self.workspace),'sign'); self.assertEqual(code,1); self.assertFalse(calls)

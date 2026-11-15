@@ -103,6 +103,20 @@ class DeviceTests(unittest.TestCase):
                 self.assertTrue(any(x['subject'] == 'split types' for x in result['not_tested']))
                 self.assertFalse(any(x['subject'] == 'split types' for x in result['verified'] + result['failures']))
 
+    def test_input_copy_limit_blocks_install_before_inspection(self):
+        large = self.root / 'large.apk'
+        large.write_bytes(b'x' * (1024 * 1024 + 1))
+        self.calls.clear()
+        with patch('apklab.device.find_tool', side_effect=self.find) as find, patch('apklab.device.inspect_one') as inspect, patch('apklab.device.run', side_effect=self.fake_run):
+            code, result = self.call('device', '--serial', 'emulator-5554',
+                                     '--confirm-install', '--max-copy-mib', '1', str(large))
+        self.assertEqual(code, 1, result)
+        self.assertFalse(any('install' in call or 'install-multiple' in call for call in self.calls))
+        find.assert_not_called()
+        inspect.assert_not_called()
+        self.assertIn('copy size limit', result['failures'][0]['detail'].lower())
+        self.assertEqual(large.stat().st_size, 1024 * 1024 + 1)
+
     def test_refuses_unverified_signer(self):
         def inspect(path, r):
             item = self.inspect(path, r); item['signer_sha256'] = None; return item

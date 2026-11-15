@@ -4,27 +4,34 @@ from __future__ import annotations
 from typing import Any, Optional, Union
 from os import PathLike
 import re
-import shutil
 import tempfile
 from pathlib import Path
 from .core import add, find_tool, inspect_one, reported, run
+from .io_utils import (DEFAULT_MAX_COPY_BYTES, DEFAULT_MAX_TOTAL_COPY_BYTES,
+                       copy_file_bounded, preflight_copy_inputs)
 from .split_metadata import assess_outputs, read_dependencies, read_split_types, report_split_types
 
 
 @reported
-def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False, _report: Any=None) -> dict:
+def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False,
+                 max_copy_bytes: int=DEFAULT_MAX_COPY_BYTES,
+                 max_total_copy_bytes: int=DEFAULT_MAX_TOTAL_COPY_BYTES,
+                 _report: Any=None) -> dict:
     r = _report
     if not re.fullmatch(r'emulator-[0-9]+', serial):
         raise ValueError('An explicit emulator-NNNN serial is required; physical devices are refused')
     if not confirm:
         raise ValueError('Installation changes emulator state; --confirm-install is required')
+    if not apks: raise ValueError('At least one APK is required')
+    inputs = [Path(p).resolve(strict=True) for p in apks]
+    if not inputs or len(inputs) > 1000:
+        raise ValueError('Provide 1 to 1000 APK files')
+    if any(not p.is_file() or p.suffix.lower() != '.apk' for p in inputs):
+        raise ValueError('Inputs must be APK files')
+    preflight_copy_inputs(inputs, max_copy_bytes, max_total_copy_bytes)
     tools = {name: find_tool(name) for name in ('adb', 'aapt', 'apksigner')}
     missing = [name for name, path in tools.items() if not path]
     if missing: raise ValueError('Required tools not found: ' + ', '.join(missing))
-    if not apks: raise ValueError('At least one APK is required')
-    inputs = [Path(p).resolve(strict=True) for p in apks]
-    if any(not p.is_file() or p.suffix.lower() != '.apk' for p in inputs):
-        raise ValueError('Inputs must be APK files')
     adb = tools['adb']
     def adb_command(*args):
         return run([adb, '-s', serial] + list(args), timeout=120)
@@ -43,10 +50,19 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
         raise ValueError('Expected a disposable single-user emulator; refusing installation')
     with tempfile.TemporaryDirectory(prefix='apklab-device-') as tmp:
         copies = []
+        copied_total = 0
         for i, src in enumerate(inputs):
             target = Path(tmp) / ('input-' + str(i) + '.apk')
-            shutil.copyfile(src, target)
+            copied = copy_file_bounded(src, target, max_copy_bytes,
+                                       max_total_bytes=max_total_copy_bytes,
+                                       already_copied=copied_total)
+            copied_total += copied
             copies.append(target)
+        r['input_copy_summary'] = {
+            'count': len(copies), 'copied_bytes': copied_total,
+            'max_per_file_bytes': max_copy_bytes,
+            'max_total_bytes': max_total_copy_bytes,
+        }
         items = [inspect_one(p, r) for p in copies]
         if r['failures']:
             return r

@@ -9,7 +9,7 @@ from .core import add, find_tool, run
 MAX_DEPENDENCIES = 512
 MAX_XML_LINES = 10000
 _ELEMENT = re.compile(r'^(\s*)E:\s+([\w.-]+)\b')
-_ATTRIBUTE = re.compile(r'^\s*A:\s+(?:(android):)?([\w.-]+)(?:\([^)]*\))?=(.*)$')
+_ATTRIBUTE = re.compile(r'^\s*A:\s+(?:(?P<namespace>[\w.-]+):)?(?P<name>[\w.-]+)(?:\([^)]*\))?=(?P<raw>.*)$')
 _STRING = re.compile(r'^"([^"]*)"(?:\s|$)')
 _SPLIT_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\Z')
 _TYPED_INT = re.compile(r'^\(type\s+0x1[01]\)0x([0-9a-fA-F]+)(?:\s|$)')
@@ -53,17 +53,23 @@ def parse_dependencies(text: str, truncated: bool=False) -> dict:
             continue
         attr = _ATTRIBUTE.match(line)
         if not attr or not stack: continue
-        namespace, name, raw = attr.groups()
+        namespace, name, raw = attr.group('namespace', 'name', 'raw')
         context = [item[1] for item in stack]
         if context == ['manifest'] and name in ('configForSplit', 'isFeatureSplit', 'versionCodeMajor'):
+            if namespace != 'android':
+                result['unresolved'].append('unexpected namespace for ' + name)
+                continue
             field = {'configForSplit': 'config_for_split', 'isFeatureSplit': 'is_feature_split', 'versionCodeMajor': 'version_code_major'}[name]
         elif context == ['manifest', 'application'] and name == 'isSplitRequired':
+            if namespace != 'android':
+                result['unresolved'].append('unexpected namespace for ' + name)
+                continue
             field = 'is_split_required'
-        elif context == ['manifest', 'uses-split'] and name == 'name' and namespace == 'android':
+        elif context == ['manifest', 'uses-split'] and name == 'name':
             node = stack[-1][2]
             if node is None: continue
             match = _STRING.match(raw)
-            if node['uses_name'] is not None or not match or not _SPLIT_NAME.fullmatch(match.group(1)):
+            if namespace != 'android' or node['uses_name'] is not None or not match or not _SPLIT_NAME.fullmatch(match.group(1)):
                 result['unresolved'].append('uses-split name')
             else: node['uses_name'] = match.group(1)
             continue

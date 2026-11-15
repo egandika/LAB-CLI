@@ -8,6 +8,7 @@ from typing import Any, Union
 from os import PathLike
 
 from .core import add, inspect_one
+from .io_utils import DEFAULT_MAX_CONTAINER_INPUT_BYTES, file_size_limited
 from .xapk import MIB, unique_json_object, validate
 
 MAX_APK = 512 * MIB
@@ -15,8 +16,10 @@ MAX_TOTAL = 2048 * MIB
 MAX_MEMBERS = 1000
 
 
-def check_members(path: Union[str, PathLike], report: Any, max_entry: int, max_total: int) -> list:
+def check_members(path: Union[str, PathLike], report: Any, max_entry: int, max_total: int,
+                  max_archive_bytes: int=DEFAULT_MAX_CONTAINER_INPUT_BYTES) -> list:
     results = []
+    file_size_limited(path, max_archive_bytes, 'Container archive input')
     with zipfile.ZipFile(path) as archive:
         infos = validate(archive, max_entry, max_total)
         members = [i for i in infos if not i.is_dir() and i.filename.lower().endswith('.apk')]

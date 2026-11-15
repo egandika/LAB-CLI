@@ -40,6 +40,39 @@ class DeepAnalysisTests(unittest.TestCase):
         self.assertEqual(code, 3, r); self.assertEqual(r['manifest']['permissions'], ['android.permission.INTERNET'])
         self.assertEqual(r['manifest']['components'], [{'type':'activity','name':'.Main'}, {'type':'service','name':'.Service'}])
         self.assertTrue(any(x['subject'] == 'manifest completeness' for x in r['not_tested']))
+    def test_inventory_disambiguates_duplicate_zip_entry_names(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            with zipfile.ZipFile(self.apk, 'w') as archive:
+                archive.writestr('AndroidManifest.xml', b'manifest')
+                archive.writestr('assets/config.txt', b'needle first')
+                archive.writestr('assets/config.txt', b'needle second')
+        code, result = self.call('inventory', str(self.apk), '--hash', '--text', 'needle')
+        self.assertEqual(code, 3, result)
+        self.assertEqual([item['zip_entry_index'] for item in result['files']], [1, 2])
+        self.assertEqual([item['path'] for item in result['files']], ['assets/config.txt'] * 2)
+        self.assertNotEqual(result['files'][0]['sha256'], result['files'][1]['sha256'])
+        self.assertEqual([item['zip_entry_index'] for item in result['content_matches']], [1, 2])
+
+    def test_aapt_manifest_names_require_android_namespace(self):
+        tree = '''E: manifest
+  E: uses-permission
+    A: android:name="android.permission.INTERNET"
+  E: uses-permission
+    A: name="org.example.permission.FAKE"
+  E: uses-permission
+    A: custom:name="org.example.permission.OTHER"
+  E: application
+    E: activity
+      A: android:name=".RealActivity"
+    E: activity
+      A: name=".FakeActivity"
+'''
+        parsed = parse_xmltree(tree)
+        self.assertEqual(parsed['permissions'], ['android.permission.INTERNET'])
+        self.assertEqual(parsed['components'], [{'type': 'activity', 'name': '.RealActivity'}])
+
     def test_missing_aapt_and_heuristics(self):
         with patch('apklab.cli.find_tool', return_value=None):
             _, r = self.call('dex', str(self.apk))

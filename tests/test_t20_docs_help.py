@@ -17,6 +17,13 @@ class DocumentationConsistencyTests(unittest.TestCase):
         self.assertIn('inspect, unpack, or repack XAPK', top)
         self.assertIn('decode/JADX/build/align/sign/verify', top)
         self.assertIn('all APK entry CRCs are always checked', self.help_text('inventory'))
+        self.assertIn('--max-archive-mib', self.help_text('inspect'))
+        self.assertIn('--max-archive-mib', self.help_text('xapk', 'inspect'))
+        self.assertIn('--max-archive-mib', self.help_text('apks', 'inspect'))
+        self.assertIn('--max-input-mib', self.help_text('jadx'))
+        self.assertIn('--max-copy-mib', self.help_text('work', 'init'))
+        self.assertIn('--max-copy-total-mib', self.help_text('splits', 'init'))
+        self.assertIn('--max-copy-total-mib', self.help_text('device'))
         self.assertIn('Compatibility option only', self.help_text('work', 'verify'))
     def test_readme_describes_current_split_fixture_and_uncertainty(self):
         readme = (Path(__file__).resolve().parents[1]/'README.md').read_text(encoding='utf-8')

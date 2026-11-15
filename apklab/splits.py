@@ -7,8 +7,9 @@ import hashlib
 import json
 import os
 import re
-import shutil
 from pathlib import Path
+from .io_utils import (DEFAULT_MAX_COPY_BYTES, DEFAULT_MAX_TOTAL_COPY_BYTES,
+                       copy_file_bounded, preflight_copy_inputs)
 from .publish import publish_new, staging
 
 MAX_APKS = 1000
@@ -21,7 +22,9 @@ def sha256(path: Union[str, PathLike]) -> str:
     return digest.hexdigest()
 
 
-def init_set(destination: Union[str, PathLike], paths: Any) -> list:
+def init_set(destination: Union[str, PathLike], paths: Any,
+             max_copy_bytes: int=DEFAULT_MAX_COPY_BYTES,
+             max_total_copy_bytes: int=DEFAULT_MAX_TOTAL_COPY_BYTES) -> list:
     inputs = [Path(p).resolve(strict=True) for p in paths]
     if not inputs or len(inputs) > MAX_APKS: raise ValueError('Provide 1 to 1000 APK files')
     if len(inputs) != len(set(inputs)): raise ValueError('Duplicate APK paths')
@@ -29,14 +32,19 @@ def init_set(destination: Union[str, PathLike], paths: Any) -> list:
         raise ValueError('All inputs must be APK files')
     root = Path(destination)
     if os.path.lexists(root): raise FileExistsError('Workspace already exists: ' + str(root))
+    preflight_copy_inputs(inputs, max_copy_bytes, max_total_copy_bytes)
     with staging(root) as staged:
         staged.mkdir()
         members = []
+        copied_total = 0
         for i, source in enumerate(inputs):
             name = 'apk-' + str(i).zfill(4)
             folder = staged / name; folder.mkdir()
             dest = folder / 'original.apk'
-            shutil.copyfile(source, dest)
+            copied = copy_file_bounded(source, dest, max_copy_bytes,
+                                       max_total_bytes=max_total_copy_bytes,
+                                       already_copied=copied_total)
+            copied_total += copied
             members.append({'id': name, 'source_name': source.name, 'sha256': sha256(dest)})
         with (staged / 'split-set.json').open('x', encoding='utf-8') as f:
             json.dump({'schema': 1, 'members': members}, f, indent=2)

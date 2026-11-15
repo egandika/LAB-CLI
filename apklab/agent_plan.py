@@ -42,9 +42,19 @@ ROUTES = {
     ('review', 'diff'): [(None, 'Review the supplied diff read-only; report actionable evidence and do not modify, commit, push, or merge')],
     ('test', 'source'): [(None, 'Run focused regression tests; distinguish synthetic or mocked results from real Android integration and report skips')],
     ('maintain', 'repo'): [(None, 'Follow repository instructions, preserve unrelated data, add regression tests, and inspect the final diff')],
-    ('black-box', 'apk'): [(None, 'Requires separate install/launch approval and an isolated disposable emulator; current device checks confirm only limited install/launcher events, not app behavior or traffic')],
-    ('black-box', 'splits'): [(None, 'Establish exact APK member scope first; split completeness and device targeting remain unknown, and installation/launch require separate approval')],
-    ('fuzz', 'parser'): [(None, 'Optional `python3 tests/fuzz_parser_inputs.py --seed 20261114 --cases 256 --max-input-mib 1` mutates synthetic AXML/DEX/ZIP only; it is bounded smoke testing, not coverage-guided fuzzing or an app test')],
+    ('black-box', 'apk'): [
+        ('device', 'Actual opt-in emulator install/optional launcher check; supply exact APK paths and use only after separate approval'),
+        (None, 'Requires an isolated disposable emulator; APKLab does not capture UI, logs, crashes, network traffic, or app behavior'),
+    ],
+    ('black-box', 'splits'): [
+        ('inspect', 'Establish the exact supplied APK member scope first'),
+        ('device', 'Actual opt-in install-multiple/optional launcher check; supply all required APK paths and obtain separate approval'),
+        (None, 'Split completeness and device targeting remain unknown; APKLab does not capture UI, logs, crashes, or network traffic'),
+    ],
+    ('fuzz', 'parser'): [
+        ('fuzz', 'Run bounded deterministic mutations on synthetic AXML/DEX/ZIP and AAPT XML-tree inputs'),
+        (None, 'Smoke testing only: not coverage-guided fuzzing, live-app fuzzing, a sandbox, or a security audit'),
+    ],
 }
 
 # First skill is primary; later entries are minimal support, not proof a host loaded them.

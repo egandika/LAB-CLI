@@ -26,7 +26,7 @@ class JadxDiagnosticTests(unittest.TestCase):
         self.assertEqual(len(diag['stderr']), 4000); self.assertTrue(diag['stderr'].startswith('warning ')); self.assertTrue(diag['stderr_truncated'])
     def test_runner_truncation_flag_is_not_lost(self):
         code, result = self.call({'returncode':0,'stdout':'','stderr':'warning','stderr_truncated':True})
-        self.assertEqual(code, 3, result); self.assertEqual(result['jadx_diagnostics'], {'stderr':'warning','stderr_truncated':True})
+        self.assertEqual(code, 3, result); self.assertEqual(result['jadx_diagnostics'], {'input_copy_bytes': 7, 'stderr':'warning','stderr_truncated':True})
     def test_failure_diagnostic_is_bounded_and_marked(self):
         code, result = self.call({'returncode':1,'stdout':'','stderr':'e'*10000,'stderr_truncated':False})
         self.assertEqual(code, 1, result); detail = result['failures'][0]['detail']

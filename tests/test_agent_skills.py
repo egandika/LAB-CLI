@@ -105,9 +105,11 @@ class AgentSkillTests(unittest.TestCase):
 
     def test_fuzzing_method_is_bounded_reproducible_and_parser_only(self):
         text = (ROOT / '.agents' / 'skills' / 'apklab-fuzzing' / 'SKILL.md').read_text(encoding='utf-8')
-        for phrase in ('python3 tests/fuzz_parser_inputs.py', 'deterministic mutation smoke testing',
-                       'not coverage-guided fuzzing', 'never install, launch, or fuzz a live app',
-                       'synthetic binary AXML, DEX, and in-memory APK ZIP seeds', 'synthetic regression fixture'):
+        for phrase in ('apklab fuzz --seed', 'python3 tests/fuzz_parser_inputs.py',
+                       'first validates the six synthetic parser seeds',
+                       'deterministic mutation smoke testing', 'not coverage-guided fuzzing',
+                       'never install, launch, or fuzz a live app',
+                       'binary AXML, DEX, and in-memory APK ZIP inputs', 'synthetic regression fixture'):
             self.assertIn(phrase, text)
         harness = ROOT / 'tests' / 'fuzz_parser_inputs.py'
         self.assertTrue(harness.is_file())

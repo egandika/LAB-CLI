@@ -27,6 +27,37 @@ class SplitDependencyParsingTests(unittest.TestCase):
         self.assertEqual(dep['status'], 'observed'); self.assertEqual(dep['uses_splits'], ['feature.maps'])
         self.assertEqual(dep['config_for_split'], 'feature.camera'); self.assertTrue(dep['is_feature_split']); self.assertFalse(dep['is_split_required']); self.assertEqual(dep['version_code_major'], 2)
 
+    def test_split_metadata_requires_android_namespace(self):
+        cases = [
+            ('E: manifest\n  A: configForSplit="feature.camera"\n', 'config_for_split'),
+            ('E: manifest\n  A: custom:configForSplit="feature.camera"\n', 'config_for_split'),
+            ('E: manifest\n  A: isFeatureSplit=(type 0x12)0x1\n', 'is_feature_split'),
+            ('E: manifest\n  E: application\n    A: isSplitRequired=(type 0x12)0x1\n', 'is_split_required'),
+            ('E: manifest\n  E: uses-split\n    A: name="feature.camera"\n', 'uses_splits'),
+        ]
+        for tree, field in cases:
+            with self.subTest(tree=tree):
+                parsed = parse_dependencies(tree)
+                self.assertEqual(parsed['status'], 'partial')
+                if field == 'uses_splits':
+                    self.assertEqual(parsed[field], [])
+                else:
+                    self.assertIsNone(parsed[field])
+                self.assertTrue(parsed['unresolved'])
+
+        fake_requirement = parse_dependencies(
+            'E: manifest\n  E: application\n    A: isSplitRequired=(type 0x12)0x1\n'
+        )
+        records = [{
+            'id': 'base',
+            'apk': {'package': 'org.example', 'version_code': '1', 'split': None,
+                    'signer_sha256': ['a' * 64]},
+            'dependencies': fake_requirement,
+        }]
+        assessment = assess_outputs(records)
+        self.assertFalse(assessment['issues'])
+        self.assertIn('dependency declarations', assessment['unknown'])
+
     def test_truncated_resource_and_missing_name_are_unknown(self):
         for tree, truncated in [('E: manifest\n  E: uses-split\n    A: android:name="camera"', True),
                                 ('E: manifest\n  A: android:configForSplit=@0x7f010001\n', False),
@@ -124,7 +155,7 @@ class SplitVerificationTests(unittest.TestCase):
         with contextlib.redirect_stdout(out): code = main(list(args))
         return code, json.loads(out.getvalue())
     def verify(self, signer_mismatch=False, missing_dependency=False, partial=False):
-        def inspect(path, r):
+        def inspect(path, r, *args, **kwargs):
             index = int(Path(path).parent.name[-1]); add(r,'verified',str(path),'signature verified')
             return {'file':str(path), 'package':'org.example', 'version_code':'1', 'split':None if index == 0 else 'config.en', 'signer_sha256':[('b' if signer_mismatch and index else 'a')*64]}
         def dependencies(path):
