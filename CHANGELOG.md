@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- List supported agent-plan combinations in CLI help and document an optional plugin-host installation example.
+
 - Add a scenario set and manual protocol for evaluating agent behavior and skill activation.
 
 - Add non-executing structured `agent plan` workflow recommendations.

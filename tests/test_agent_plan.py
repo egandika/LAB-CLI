@@ -26,6 +26,15 @@ class AgentPlanTests(unittest.TestCase):
         self.assertEqual(plan('triage', 'apks')[0]['command'], 'apks inspect')
         code, report = self.call('--goal', 'compare', '--kind', 'xapk')
         self.assertEqual(code, 1); self.assertIn('Unsupported', report['failures'][0]['detail'])
+    def test_help_lists_supported_goal_kind_pairs(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as result:
+            main(['agent', 'plan', '--help'])
+        self.assertEqual(result.exception.code, 0)
+        normalized = ' '.join(out.getvalue().split())
+        for goal, kind in ROUTES:
+            self.assertIn(goal + '/' + kind, normalized)
+
     def test_plan_reports_approval_and_limitations(self):
         _, result = self.call('--goal', 'rebuild', '--kind', 'apk')
         self.assertTrue(any('Ask before' in x for x in result['agent_plan']['permissions']))

@@ -767,7 +767,11 @@ def parser() -> argparse.ArgumentParser:
         x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
     q = cmd('agent', 'Provide non-executing structured agent guidance', agent)
     actions = q.add_subparsers(dest='action', required=True)
-    i = actions.add_parser('plan', help='Recommend an APKLab workflow without reading files or running tools')
+    from .agent_plan import ROUTES
+    combinations = '\n'.join('  ' + goal + '/' + kind for goal, kind in ROUTES)
+    i = actions.add_parser('plan', help='Recommend an APKLab workflow without reading files or running tools',
+                           formatter_class=argparse.RawDescriptionHelpFormatter,
+                           epilog='Supported goal/kind combinations:\n' + combinations)
     i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('--goal', required=True, choices=('triage', 'investigate', 'compare', 'split-check', 'rebuild', 'report', 'diagnose'))

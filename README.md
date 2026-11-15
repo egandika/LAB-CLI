@@ -78,7 +78,7 @@ Repo-local instruction-only skills in `.agents/skills/` help with triage, invest
 
 ### Optional agent plugin package
 
-`agent-plugin/` contains an instruction-only Agent Plugins 1.0-style package of the same skills. It has no hooks, MCP server, executable scripts or pre-approved tools. Client support and installation methods vary; inspect the package and your client's documentation before installing or enabling it, and obtain user approval first. It has not been tested with a real plugin host. The repo skills remain the source of truth; tests check that plugin copies match them. A plugin does not install APKLab or grant terminal access.
+`agent-plugin/` contains an instruction-only Agent Plugins 1.0-style package of the same skills. It has no hooks, MCP server, executable scripts or pre-approved tools. Client support and installation methods vary; inspect the package and your client's documentation before installing or enabling it, and obtain user approval first. It has not been tested with a real plugin host. The repo skills remain the source of truth; tests check that plugin copies match them. A plugin does not install APKLab or grant terminal access. For example, GitHub documents `copilot plugin install ./agent-plugin` for an approved local installation; consult the [Copilot plugin documentation](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-creating) for current usage and removal. This example has not been tested in a plugin host.
 
 ### Structured agent plan
 
