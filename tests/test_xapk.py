@@ -87,6 +87,29 @@ class XapkTests(unittest.TestCase):
         self.write_archive([('base.apk', b'fake'), ('manifest.json', '{bad json')])
         code, r = self.call('xapk', 'inspect', str(self.source))
         self.assertEqual(code, 1); self.assertEqual(r['manifest']['status'], 'invalid')
+    def test_check_apks_valid_mismatch_missing_and_corrupt(self):
+        content = self.apk.read_bytes(); digest = hashlib.sha256(content).hexdigest()
+        for field, expected, status in [('sha256', digest, 3), ('sha256', '0'*64, 1), ('size', len(content)+1, 1), ('sha256', None, 3)]:
+            item = {'file':'base.apk', 'size':len(content), 'sha256':digest}
+            if expected is None: item.pop(field)
+            else: item[field] = expected
+            self.write_archive([('base.apk', content), ('manifest.json', json.dumps({'split_apks':[item]}))])
+            before = self.source.read_bytes()
+            with self.subTest(field=field, expected=expected), patch('apklab.core.find_tool', return_value=None):
+                code, r = self.call('xapk', 'inspect', str(self.source), '--check-apks')
+            self.assertEqual(code, status, r); self.assertEqual(r['contained_apks'][0]['sha256'], digest)
+            self.assertEqual(before, self.source.read_bytes())
+            if expected is None: self.assertTrue(any('absent or unsupported' in x['detail'] for x in r['not_tested']))
+        self.write_archive([('base.apk', b'not an apk')])
+        code, r = self.call('xapk', 'inspect', str(self.source), '--check-apks')
+        self.assertEqual(code, 1); self.assertTrue(any('ZIP inspection' in x['detail'] for x in r['failures']))
+
+    def test_check_apks_copy_limit(self):
+        self.write_archive([('base.apk', self.apk.read_bytes())])
+        with patch('apklab.xapk_checks.MAX_APK', 1):
+            code, r = self.call('xapk', 'inspect', str(self.source), '--check-apks')
+        self.assertEqual(code, 1); self.assertTrue(any('safety limit' in x['detail'] for x in r['failures']))
+
     def test_no_apks(self):
         self.write_archive([('manifest.json', b'{}')])
         code, _ = self.call('xapk', 'inspect', str(self.source)); self.assertEqual(code, 1)

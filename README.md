@@ -124,6 +124,7 @@ When metadata is available, `inspect` lists APKs without a reported split name a
 
 ```sh
 apklab xapk inspect game.xapk --verify
+apklab xapk inspect game.xapk --check-apks
 apklab xapk unpack game.xapk ./xapk-copy
 apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 ```
@@ -131,6 +132,8 @@ apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 `jadx` copies the input to a temporary directory and creates a new output directory. Its JSON report includes up to 4,000 characters of JADX stderr and a truncation flag, including on successful runs; diagnostics may contain sensitive information. It stops the tool when the timeout or monitored output-size limit is exceeded and removes that newly created output on failure. The default monitored output limit is 128 MiB; checks are sampled approximately every 10 ms while the monitor is active and **are not a hard disk quota**; output can briefly exceed the limit. The runner terminates the POSIX process group or Windows job on exit, but detached or escaped processes are not guaranteed to be contained; this is not a sandbox. Use OS-level isolation and disk quotas for untrusted APKs. `work jadx` uses the same process runner and a 128 MiB monitored output limit; workspace stages stage their outputs before publication and clean up on failure. Atomic directory publication requires platform support; a cleanup error can leave a staging directory.
 
 `xapk inspect` lists entries; `--verify` reads each file, checks CRC, and computes SHA-256. `unpack` only reads the original archive and copies its contents into a **new** directory, checking CRC and hashes. Path traversal, duplicate or colliding paths, symlinks, special files, encrypted entries, and size-limit violations are rejected.
+
+`xapk inspect --check-apks` copies at most 1000 contained APKs (512 MiB each, 2048 MiB total) to temporary files, checks APK ZIPs and compares supported declared `size`/`sha256` fields. It reads available metadata and optionally verifies signatures with installed tools; absent or unsupported fields are untested. Hash matches do not authenticate the publisher, and this does not establish split completeness or OBB compatibility.
 
 APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. Duplicate JSON keys at any depth are rejected as ambiguous. This does not validate manifest completeness, all APK contents, or OBB compatibility. Unpack and repack stage their outputs and validate supported manifest references before publishing; a manifest failure prevents publication. Unsupported manifest formats remain untested.
 

@@ -255,7 +255,8 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
             add(r, 'failures', 'XAPK manifest', manifest['reason'])
         else:
             add(r, 'not_tested', 'XAPK manifest', 'No supported split_apks list: ' + manifest.get('reason', manifest['status']))
-        add(r, 'not_tested', 'contained APKs', 'APK metadata, signatures and split compatibility are not checked here; run inspect on extracted APKs')
+        if args.action != 'inspect' or not getattr(args, 'check_apks', False):
+            add(r, 'not_tested', 'contained APKs', 'APK metadata, signatures and split compatibility are not checked here; run inspect on extracted APKs')
         add(r, 'not_tested', 'XAPK layout', 'Manifest completeness, OBB compatibility and installation are not validated')
 
     if args.action == 'inspect':
@@ -266,6 +267,9 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
         else:
             add(r, 'not_tested', 'XAPK CRC', 'Use --verify to read and CRC-check all file entries')
         describe(entries, args.archive)
+        if getattr(args, 'check_apks', False):
+            from .xapk_checks import check_members
+            r['contained_apks'] = check_members(args.archive, r, entry, total)
         return r
 
     destination = Path(args.destination)
@@ -649,7 +653,9 @@ def parser() -> argparse.ArgumentParser:
             x.add_argument('--directory', action='store_true', help='Create new directory with repacked.xapk and manifest-validated OBB layout')
             x.add_argument('--update-manifest', action='store_true', help='Update size and sha256 in supported split_apks entries for replacements')
             x.add_argument('--replace', action='append', default=[], metavar='ENTRY=APK', help='Replace an existing APK entry; repeat as needed')
-        else: x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
+        else:
+            x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
+            x.add_argument('--check-apks', action='store_true', help='Inspect bounded copies of contained APKs and declared size/SHA-256')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
         x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
     q = cmd('inventory', 'List asset and native library paths', inventory)
