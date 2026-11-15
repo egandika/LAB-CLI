@@ -129,7 +129,7 @@ apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 
 `xapk inspect` lists entries; `--verify` reads each file, checks CRC, and computes SHA-256. `unpack` only reads the original archive and copies its contents into a **new** directory, checking CRC and hashes. Path traversal, duplicate or colliding paths, symlinks, special files, encrypted entries, and size-limit violations are rejected.
 
-APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. This does not validate manifest completeness, all APK contents, or OBB compatibility. Unpack and repack stage their outputs and validate supported manifest references before publishing; a manifest failure prevents publication. Unsupported manifest formats remain untested.
+APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. Duplicate JSON keys at any depth are rejected as ambiguous. This does not validate manifest completeness, all APK contents, or OBB compatibility. Unpack and repack stage their outputs and validate supported manifest references before publishing; a manifest failure prevents publication. Unsupported manifest formats remain untested.
 
 To create a **new** XAPK and replace selected APK entries with copies you have rebuilt and signed:
 

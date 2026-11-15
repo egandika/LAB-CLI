@@ -17,6 +17,15 @@ MAX_FILES = 100000
 CHUNK = 1024 * 1024
 
 
+def unique_json_object(pairs: Any) -> dict:
+    """Reject ambiguous duplicate keys at every JSON object depth."""
+    result = {}
+    for key, value in pairs:
+        if key in result: raise ValueError('Duplicate JSON key in manifest: ' + key)
+        result[key] = value
+    return result
+
+
 def validate(z: Any, max_entry: int, max_total: int) -> list:
     if max_entry < 1 or max_total < 1:
         raise ValueError('Size limits must be positive')
@@ -119,10 +128,10 @@ def manifest_info(path: Union[str, PathLike], entries: Any, directory: bool=Fals
         return {'status': 'unsupported', 'reason': 'manifest.json exceeds 1 MiB'}
     try:
         if directory:
-            data = json.loads((Path(path) / 'manifest.json').read_bytes().decode('utf-8'))
+            data = json.loads((Path(path) / 'manifest.json').read_bytes().decode('utf-8'), object_pairs_hook=unique_json_object)
         else:
             with zipfile.ZipFile(path) as z:
-                data = json.loads(z.read('manifest.json').decode('utf-8'))
+                data = json.loads(z.read('manifest.json').decode('utf-8'), object_pairs_hook=unique_json_object)
     except (UnicodeError, ValueError, zipfile.BadZipFile, RuntimeError) as e:
         return {'status': 'invalid', 'reason': str(e)}
     if not isinstance(data, dict):
@@ -167,13 +176,7 @@ def repack(path: Union[str, PathLike], destination: Union[str, PathLike], replac
             if not replacements: raise ValueError('--update-manifest requires at least one replacement')
             manifest = files.get('manifest.json')
             if manifest is None or manifest.file_size > MIB: raise ValueError('A supported manifest.json within 1 MiB is required')
-            def unique_object(pairs):
-                obj = {}
-                for key, value in pairs:
-                    if key in obj: raise ValueError('Duplicate JSON key in manifest: ' + key)
-                    obj[key] = value
-                return obj
-            try: data = json.loads(source.read(manifest).decode('utf-8'), object_pairs_hook=unique_object)
+            try: data = json.loads(source.read(manifest).decode('utf-8'), object_pairs_hook=unique_json_object)
             except (UnicodeError, ValueError) as exc: raise ValueError('Invalid manifest.json: ' + str(exc)) from exc
             declarations = data.get('split_apks') if isinstance(data, dict) else None
             if not isinstance(declarations, list) or not all(isinstance(x, dict) and isinstance(x.get('file'), str) for x in declarations):
@@ -246,7 +249,7 @@ def obb_layout(path: Union[str, PathLike], infos: Any) -> dict:
     if not manifest or manifest.file_size > MIB:
         raise ValueError('A supported manifest.json is required for validated OBB placement')
     with zipfile.ZipFile(path) as z:
-        data = json.loads(z.read(manifest).decode('utf-8'))
+        data = json.loads(z.read(manifest).decode('utf-8'), object_pairs_hook=unique_json_object)
     if not isinstance(data, dict): raise ValueError('manifest.json must be an object')
     package = data.get('package_name')
     if not isinstance(package, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+', package):
