@@ -26,6 +26,43 @@ class SetupJadxTests(unittest.TestCase):
             _, doctor = self.call('doctor')
             for name in doctor['tools']:
                 self.assertTrue(any(x['subject'] == name and 'apklab setup --plan' in x['detail'] for x in doctor['not_tested']))
+    def test_goal_plans_are_presence_only_and_do_not_run_tools(self):
+        expected = {
+            'basic': (set(), {'aapt', 'apksigner'}),
+            'jadx': ({'java', 'jadx'}, set()),
+            'decode': ({'java', 'apktool'}, set()),
+            'rebuild': ({'java', 'apktool', 'zipalign', 'apksigner'}, {'aapt', 'readelf'}),
+            'verify': ({'java', 'zipalign', 'apksigner'}, {'readelf'}),
+            'device': ({'java', 'adb', 'aapt', 'apksigner'}, {'emulator'}),
+        }
+        for goal, (required, optional) in expected.items():
+            with self.subTest(goal=goal), patch('apklab.cli.find_tool', side_effect=lambda name: '/fake/' + name if name == 'java' else None) as find, patch('apklab.cli.run') as run, patch('apklab.cli.find_executable') as executable:
+                code, result = self.call('setup', '--plan', '--for', goal)
+            self.assertEqual(code, 3)
+            plan = result['plan']['goal']
+            self.assertEqual(plan['goal'], goal)
+            self.assertEqual({x['name'] for x in plan['tools'] if x['category'] == 'required'}, required)
+            self.assertEqual({x['name'] for x in plan['tools'] if x['category'] == 'optional'}, optional)
+            self.assertEqual({call.args[0] for call in find.call_args_list}, required | optional)
+            self.assertTrue(all(x['source_url'].startswith('https://') for x in plan['tools']))
+            self.assertTrue(any(x['subject'] == 'tool functionality' for x in result['not_tested']))
+            self.assertFalse(result['failures'])
+            run.assert_not_called(); executable.assert_not_called()
+            if 'java' in required:
+                self.assertTrue(any(x['subject'] == 'java' and 'presence only' in x['detail'] for x in result['verified']))
+            for name in (required | optional) - {'java'}:
+                self.assertTrue(any(x['subject'] == name for x in result['not_tested']))
+
+    def test_goal_plan_without_plan_flag_and_install_conflict(self):
+        with patch('apklab.cli.find_tool', return_value=None), patch('apklab.cli.run') as run:
+            code, result = self.call('setup', '--for', 'jadx')
+            self.assertEqual(code, 3); self.assertEqual(result['plan']['goal']['goal'], 'jadx')
+            for args in (('setup', '--install', '--for', 'jadx'), ('setup', '--for', 'unknown')):
+                with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
+                    main(list(args))
+                self.assertEqual(exc.exception.code, 2)
+            run.assert_not_called()
+
     def test_jadx_copy_new_output_and_size_limit(self):
         def fake_run(args, timeout, monitor):
             self.assertEqual(Path(args[-1]).read_bytes(), b'fixture')

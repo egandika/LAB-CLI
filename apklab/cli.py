@@ -15,7 +15,7 @@ from .workflow import init, perform, workspace_input, supports_16k
 from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, repack as repack_xapk, repack_directory, manifest_info
 from .device import install_test
 from .splits import init_set, read_set
-from .setup_plan import plan as setup_guidance, NEXT
+from .setup_plan import plan as setup_guidance, goal_plan, GOALS, NEXT
 from .jadx import decompile
 from .analysis import parse_xmltree, candidates, magic_type
 from .split_metadata import assess_outputs, read_dependencies, read_split_types, report_split_types, unavailable_split_types
@@ -76,8 +76,16 @@ def setup(args: argparse.Namespace) -> dict:
     packages = {'java': 'default-jre-headless', 'apktool': 'apktool', 'adb': 'adb', 'aapt': 'aapt', 'zipalign': 'zipalign', 'apksigner': 'apksigner'}
     r['plan'] = setup_guidance()
     r['plan']['apt_packages'] = packages
+    if args.setup_goal:
+        r['plan']['goal'] = goal_plan(args.setup_goal, find_tool)
+        for tool in r['plan']['goal']['tools']:
+            if tool['path']:
+                add(r, 'verified', tool['name'], 'Executable found: ' + tool['path'] + ' (presence only)')
+            else:
+                add(r, 'not_tested', tool['name'], tool['category'].capitalize() + ' executable not found; review its source before installation')
+        add(r, 'not_tested', 'tool functionality', 'Versions, compatibility and functionality have not been tested')
     if not args.install:
-        add(r, 'not_tested', 'installation', 'Plan only. Run setup --install to attempt missing packages via APT; system configuration will change.')
+        add(r, 'not_tested', 'installation', 'Plan only. setup --install is a separate, broad APT operation, not goal-specific; review and approve its system changes first.')
         return r
     apt = find_executable('apt-get')
     if not apt:
@@ -98,14 +106,17 @@ def setup(args: argparse.Namespace) -> dict:
     if missing:
         res = run(prefix + [apt, '-o', 'APT::Update::Error-Mode=any', '-o', 'Acquire::Retries=0', '-o', 'Acquire::http::Timeout=10', '-o', 'Acquire::https::Timeout=10', 'update'], timeout=180)
         if res['returncode'] != 0:
-            add(r, 'failures', 'apt update', (res['stderr'] or res['stdout'])[-3000:])
-        for tool, pkg in missing.items():
-            res = run(prefix + [apt, '-y', '-o', 'Acquire::Retries=0', '-o', 'Acquire::http::Timeout=10', '-o', 'Acquire::https::Timeout=10', 'install', pkg], timeout=180)
-            found = find_tool(tool)
-            if res['returncode'] == 0 and found:
-                add(r, 'verified', tool, 'APT installed; executable found: ' + found)
-            else:
-                add(r, 'failures', tool, 'Install/verification failed: ' + (res['stderr'] or res['stdout'])[-1500:])
+            add(r, 'failures', 'apt update', (res['stderr'] or res['stdout'] or 'APT update did not succeed')[-3000:])
+            for tool in missing:
+                add(r, 'not_tested', tool, 'Installation not attempted because APT update failed')
+        else:
+            for tool, pkg in missing.items():
+                res = run(prefix + [apt, '-y', '-o', 'Acquire::Retries=0', '-o', 'Acquire::http::Timeout=10', '-o', 'Acquire::https::Timeout=10', 'install', pkg], timeout=180)
+                found = find_tool(tool)
+                if res['returncode'] == 0 and found:
+                    add(r, 'verified', tool, 'APT installed; executable found: ' + found)
+                else:
+                    add(r, 'failures', tool, 'Install/verification failed: ' + (res['stderr'] or res['stdout'])[-1500:])
     for tool in packages:
         if tool not in missing: add(r, 'verified', tool, 'Already present: ' + find_tool(tool))
     add(r, 'not_tested', 'manual tools', 'JADX, SDK, emulator and Ghidra are not installed by this command; see README')
@@ -737,6 +748,7 @@ def parser() -> argparse.ArgumentParser:
     mode = q.add_mutually_exclusive_group()
     mode.add_argument('--plan', action='store_true', help='Show official-source guidance without installing')
     mode.add_argument('--install', action='store_true', help='Actually install missing packages using configured APT repositories')
+    q.add_argument('--for', dest='setup_goal', choices=tuple(GOALS), help='Discover tools for a goal (plan only; cannot be used with --install)')
     q = cmd('inspect', 'Inspect one APK or a split set (files or directories)', inspect)
     q.add_argument('apks', nargs='+')
     q.add_argument('--recursive', action='store_true', help='Include APKs in subdirectories of supplied directories')
@@ -843,7 +855,10 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Any=None) -> int:
-    args = parser().parse_args(argv)
+    p = parser()
+    args = p.parse_args(argv)
+    if args.command == 'setup' and args.install and args.setup_goal:
+        p.error('--for is only available for setup planning, not --install')
     try:
         if getattr(args, 'limit', 1) < 1: raise ValueError('--limit must be positive')
         r = args.func(args)
