@@ -15,7 +15,7 @@ from .workflow import init, perform, workspace_input, supports_16k
 from .xapk import MIB, examine as examine_xapk, unpack as unpack_xapk, repack as repack_xapk, repack_directory, manifest_info
 from .device import install_test
 from .splits import init_set, read_set
-from .setup_plan import plan as setup_guidance, NEXT
+from .setup_plan import plan as setup_guidance, goal_plan, GOALS, NEXT
 from .jadx import decompile
 from .analysis import parse_xmltree, candidates, magic_type
 from .split_metadata import assess_outputs, read_dependencies, read_split_types, report_split_types, unavailable_split_types
@@ -76,8 +76,16 @@ def setup(args: argparse.Namespace) -> dict:
     packages = {'java': 'default-jre-headless', 'apktool': 'apktool', 'adb': 'adb', 'aapt': 'aapt', 'zipalign': 'zipalign', 'apksigner': 'apksigner'}
     r['plan'] = setup_guidance()
     r['plan']['apt_packages'] = packages
+    if args.setup_goal:
+        r['plan']['goal'] = goal_plan(args.setup_goal, find_tool)
+        for tool in r['plan']['goal']['tools']:
+            if tool['path']:
+                add(r, 'verified', tool['name'], 'Executable found: ' + tool['path'] + ' (presence only)')
+            else:
+                add(r, 'not_tested', tool['name'], tool['category'].capitalize() + ' executable not found; review its source before installation')
+        add(r, 'not_tested', 'tool functionality', 'Versions, compatibility and functionality have not been tested')
     if not args.install:
-        add(r, 'not_tested', 'installation', 'Plan only. Run setup --install to attempt missing packages via APT; system configuration will change.')
+        add(r, 'not_tested', 'installation', 'Plan only. setup --install is a separate, broad APT operation, not goal-specific; review and approve its system changes first.')
         return r
     apt = find_executable('apt-get')
     if not apt:
@@ -737,6 +745,7 @@ def parser() -> argparse.ArgumentParser:
     mode = q.add_mutually_exclusive_group()
     mode.add_argument('--plan', action='store_true', help='Show official-source guidance without installing')
     mode.add_argument('--install', action='store_true', help='Actually install missing packages using configured APT repositories')
+    q.add_argument('--for', dest='setup_goal', choices=tuple(GOALS), help='Discover tools for a goal (plan only; cannot be used with --install)')
     q = cmd('inspect', 'Inspect one APK or a split set (files or directories)', inspect)
     q.add_argument('apks', nargs='+')
     q.add_argument('--recursive', action='store_true', help='Include APKs in subdirectories of supplied directories')
@@ -843,7 +852,10 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Any=None) -> int:
-    args = parser().parse_args(argv)
+    p = parser()
+    args = p.parse_args(argv)
+    if args.command == 'setup' and args.install and args.setup_goal:
+        p.error('--for is only available for setup planning, not --install')
     try:
         if getattr(args, 'limit', 1) < 1: raise ValueError('--limit must be positive')
         r = args.func(args)

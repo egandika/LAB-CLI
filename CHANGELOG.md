@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add non-installing goal-specific tool discovery to setup plans; prevent combining goals with the broad APT installer.
+
 - Cover agent-plan subprocess reporting, no-overwrite behavior and unsupported goal/input pairs.
 
 - Distinguish non-executable guidance from real command names in structured agent plans.
