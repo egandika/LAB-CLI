@@ -18,7 +18,7 @@ from .splits import init_set, read_set
 from .setup_plan import plan as setup_guidance, NEXT
 from .jadx import decompile
 from .analysis import parse_xmltree, candidates, magic_type
-from .split_metadata import assess_outputs, read_dependencies
+from .split_metadata import assess_outputs, read_dependencies, read_split_types, assess_split_types
 
 
 VERSION_ARGS = {
@@ -127,6 +127,35 @@ def apk_paths(inputs: Any, recursive: bool=False) -> list:
 
 @reported
 def inspect(args: argparse.Namespace, _report: Any) -> dict:
+    if not getattr(args, 'split_types', False):
+        return _inspect_inputs(args, _report)
+    # All inspection, including external tools, runs on temporary copies.
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='apklab-split-types-') as tmp:
+        originals = apk_paths(args.apks, args.recursive)
+        copies = []
+        replacements = {}
+        for index, source in enumerate(originals):
+            copy = Path(tmp) / ('input-%04d%s' % (index, source.suffix))
+            shutil.copyfile(source, copy)
+            copies.append(str(copy))
+            replacements[str(copy)] = str(source)
+        staged = argparse.Namespace(**vars(args))
+        staged.apks = copies
+        staged.recursive = False
+        result = _inspect_inputs(staged, _report)
+        def restore(value):
+            if isinstance(value, str):
+                for copy, source in replacements.items(): value = value.replace(copy, source)
+                return value
+            if isinstance(value, list): return [restore(item) for item in value]
+            if isinstance(value, dict): return {restore(key): restore(item) for key, item in value.items()}
+            return value
+        return restore(result)
+
+
+def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['apks'] = []
     for p in apk_paths(args.apks, args.recursive):
@@ -160,6 +189,38 @@ def inspect(args: argparse.Namespace, _report: Any) -> dict:
     for issue in r['split_analysis']['issues']: add(r, 'failures', 'split set', issue)
     for unknown in r['split_analysis']['unknown']:
         add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
+    if getattr(args, 'split_types', False):
+        type_records = []
+        for item in r['apks']:
+            if 'entries' not in item:
+                observation = {'source': 'unavailable', 'reason': 'APK ZIP validation did not succeed',
+                               'attributes': {name: {'status': 'unknown', 'reason': 'input unavailable'} for name in ('requiredSplitTypes', 'splitTypes')}}
+            else:
+                observation = read_split_types(item['file'])
+            type_records.append({'id': item['file'], 'apk': item, 'types': observation})
+            for name, attribute in observation['attributes'].items():
+                if attribute['status'] == 'literal':
+                    category = 'inferences' if observation['source'] == 'internal_axml' else 'verified'
+                    add(r, category, item['file'], name + ' literal from ' + observation['source'] + ': ' + repr(attribute['value']))
+                elif attribute['status'] == 'unknown':
+                    add(r, 'not_tested', item['file'], name + ': ' + attribute.get('reason', 'unknown'))
+            if observation['source'] == 'internal_axml':
+                add(r, 'not_tested', item['file'], 'aapt split type reading unavailable; internal AXML observations are inferences')
+        r['split_type_observations'] = [{'file': record['id'], **record['types']} for record in type_records]
+        analysis = assess_split_types(type_records)
+        r['split_types'] = analysis
+        for reason in analysis['unknown']:
+            add(r, 'not_tested', 'split types', reason)
+        if not analysis['unknown']:
+            if analysis['source'] == 'internal_axml':
+                add(r, 'inferences', 'split types', 'Compared literal types from supplied inputs including internal AXML; missing: ' + ', '.join(analysis['missing']))
+                if analysis['missing']:
+                    add(r, 'not_tested', 'split types', 'Missing types inferred using internal AXML are not independently verified')
+            elif analysis['missing']:
+                add(r, 'failures', 'split types', 'Required types not offered by supplied APKs: ' + ', '.join(analysis['missing']))
+            else:
+                add(r, 'verified', 'split types', 'No declared required types are missing from the supplied inputs')
+        add(r, 'not_tested', 'split types', 'Additional splits may be required; completeness, device selection and installation were not tested')
     if args.device_abi:
         present = sorted({abi for apk in r['apks'] for abi in apk['architectures']})
         r['abi_observation'] = {'requested': args.device_abi, 'native_directories': present}
@@ -546,6 +607,7 @@ def parser() -> argparse.ArgumentParser:
     q = cmd('inspect', 'Inspect one APK or a split set (files or directories)', inspect)
     q.add_argument('apks', nargs='+')
     q.add_argument('--recursive', action='store_true', help='Include APKs in subdirectories of supplied directories')
+    q.add_argument('--split-types', action='store_true', help='Compare literal required and provided split types from supplied APKs')
     q.add_argument('--device-abi', help='Compare a device ABI with observed native library directory names')
     zip_limits(q)
     q = cmd('xapk', 'Safely inspect, unpack, or repack XAPK archives', xapk)

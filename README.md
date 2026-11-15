@@ -101,6 +101,7 @@ Android tool discovery prefers `PATH`, then Android SDK roots in `ANDROID_SDK_RO
 ```sh
 apklab inspect app.apk
 apklab inspect base.apk split_config.arm64_v8a.apk
+apklab inspect base.apk split_config.arm64_v8a.apk --split-types
 apklab inspect ./split-directory --recursive --device-abi arm64-v8a --report inspection.json
 apklab dex app.apk --search login --limit 50
 apklab jadx app.apk ./jadx-output --timeout 600 --max-output-mib 128
@@ -109,6 +110,8 @@ apklab inventory app.apk --text 'example.org'
 ```
 
 `inspect`, `dex`, and `inventory` require an APK ZIP with exactly one root manifest and check every entry CRC within the configured ZIP limits. These checks do not validate manifest contents or APK signatures. `inspect` also lists native ABI directories. With `aapt` and `apksigner`, it also reads metadata and verifies signatures. Without `aapt`, a bounded internal binary-AXML parser attempts literal package, version, permission and component metadata and labels it as an inference; resources and split identity are not resolved. Unsupported or malformed manifests remain untested. For inspected APKs, explicit `uses-split`, `configForSplit` and a base’s `isSplitRequired` are checked where readable; missing declarations or resources remain untested and do not establish completeness. For multiple APKs, available package names, version codes, and certificate digest sets are compared, and duplicate non-empty split names reported by `aapt` are flagged. Unavailable checks are marked `not_tested`; matching digests do not prove that a split set is complete or compatible. Base selection, split dependencies, device compatibility, signer rotation, and installation are not fully validated.
+
+With `--split-types`, `inspect` first copies every selected input to a temporary directory and performs inspection on those copies. It reads literal root `android:requiredSplitTypes` and `android:splitTypes` with `aapt` if available, or with the bounded internal AXML parser if `aapt` is missing or fails. It compares the base candidate's declared required types with the union of types observed in the supplied APKs, only if base identity and package/version metadata are sufficiently clear and all relevant attributes can be read. Absent and empty attributes contribute no types; resource references, ambiguous namespaces, duplicates, truncated output, unreadable metadata, and unsupported values are untested. Literals from `aapt` are recorded as verified observations; all internal AXML observations and comparisons are inferences. A missing type from an all-`aapt` comparison is a failure for the supplied inputs, while a missing type inferred with internal AXML is not a verified failure. Additional splits may be required: a match does not establish set completeness, device selection, installability, or runtime behavior. No manifest is edited or split selected automatically. Temporary copies require sufficient disk space.
 
 When metadata is available, `inspect` lists APKs without a reported split name as **base candidates**, not confirmed bases. `--device-abi` compares native directory names only; it does not establish compatibility or select the correct splits.
 

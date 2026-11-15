@@ -33,7 +33,8 @@ def parse_manifest(data: bytes) -> dict:
     closed = False
     count = 0
     result = {'package': None, 'version_code': None, 'version_name': None,
-              'permissions': [], 'components': [], 'unresolved': []}
+              'permissions': [], 'components': [], 'unresolved': [],
+              'split_type_attributes': {}, 'split_identity': {'status': 'absent'}}
     def string(index):
         if index == NONE: return None
         if strings is None or index >= len(strings): raise ValueError('Invalid AXML string index')
@@ -96,6 +97,8 @@ def parse_manifest(data: bytes) -> dict:
                 raise ValueError('Invalid AXML attributes or nesting')
             context = stack + [tag]
             attrs = {}
+            types = {}
+            typed_strings = {}
             for i in range(nattrs):
                 p = off + 16 + attrstart + i * attrsize
                 ans, aname, raw, vsize, res0, vtype, value = struct.unpack_from('<IIIHBBI', data, p)
@@ -109,6 +112,8 @@ def parse_manifest(data: bytes) -> dict:
                 # A raw spelling of a reference does not resolve its resource value.
                 if raw_value is not None and vtype in (3, 0x10, 0x11): val = raw_value
                 attrs[key] = val
+                types[key] = vtype
+                if vtype == 3: typed_strings[key] = string(value)
             def get(ns, name):
                 key = (ns, name)
                 if key in attrs and attrs[key] is None: result['unresolved'].append('/'.join(context) + '@' + name)
@@ -117,6 +122,27 @@ def parse_manifest(data: bytes) -> dict:
                 result['package'] = get(None, 'package')
                 result['version_code'] = get(ANDROID, 'versionCode')
                 result['version_name'] = get(ANDROID, 'versionName')
+                # Retain provenance and typed-value information: a resource reference
+                # must never become a literal just because it has a raw spelling.
+                for name in ('requiredSplitTypes', 'splitTypes'):
+                    key = (ANDROID, name)
+                    other = any(k[1] == name and k != key for k in attrs)
+                    if other:
+                        result['split_type_attributes'][name] = {'status': 'unknown', 'reason': 'unexpected namespace'}
+                    elif key not in attrs:
+                        result['split_type_attributes'][name] = {'status': 'absent'}
+                    elif types[key] != 3 or attrs[key] is None or attrs[key] != typed_strings.get(key):
+                        result['split_type_attributes'][name] = {'status': 'unknown', 'reason': 'non-string or resource reference'}
+                    else:
+                        result['split_type_attributes'][name] = {'status': 'literal', 'value': attrs[key]}
+                key = (None, 'split')
+                if any(k[1] == 'split' and k != key for k in attrs):
+                    result['split_identity'] = {'status': 'unknown', 'reason': 'unexpected namespace'}
+                elif key in attrs:
+                    if types[key] == 3 and attrs[key] and attrs[key] == typed_strings.get(key):
+                        result['split_identity'] = {'status': 'literal', 'value': attrs[key]}
+                    else:
+                        result['split_identity'] = {'status': 'unknown', 'reason': 'invalid split identity'}
             elif len(context) == 2 and tag in ('uses-permission', 'uses-permission-sdk-23'):
                 value = get(ANDROID, 'name')
                 if value: result['permissions'].append(value)
