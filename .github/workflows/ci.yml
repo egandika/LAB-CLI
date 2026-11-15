@@ -69,7 +69,7 @@ jobs:
           APKLAB_TEST_16K: '1'
           APKLAB_TEST_JADX: '1'
           APKLAB_TEST_SPLITS: '1'
-        run: python -m unittest discover -s tests -p test_integration.py -v
+        run: python .github/scripts/run_unit_tests.py --integration
 
   emulator:
     name: Disposable emulator integration
@@ -108,4 +108,4 @@ jobs:
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: python -m unittest discover -s tests -p test_integration.py -v
+          script: python .github/scripts/run_unit_tests.py --integration
