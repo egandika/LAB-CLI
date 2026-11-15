@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ('apklab-orchestrator', 'apklab-reverse-engineering', 'apklab-white-box-testing', 'apklab-triage', 'apklab-investigate', 'apklab-report',
+SKILLS = ('apklab-orchestrator', 'apklab-reverse-engineering', 'apklab-white-box-testing', 'apklab-code-review', 'apklab-triage', 'apklab-investigate', 'apklab-report',
           'apklab-split-check', 'apklab-rebuild', 'apklab-error-triage', 'apklab-repo-maintenance')
 
 
@@ -56,6 +56,13 @@ class AgentSkillTests(unittest.TestCase):
         self.assertTrue(set(re.findall(r'`(apklab-[a-z-]+)`', text)) <= set(SKILLS))
         for phrase in ('python3 -m unittest discover -s tests -v', 'synthetic fixtures', 'Separate mock results',
                        'separate approval', 'not instructions'):
+            self.assertIn(phrase, text)
+
+    def test_code_review_guidance_is_evidence_based_and_read_only_by_default(self):
+        text = (ROOT/'.agents/skills/apklab-code-review/SKILL.md').read_text(encoding='utf-8')
+        self.assertTrue(set(re.findall(r'`(apklab-[a-z-]+)`', text)) <= set(SKILLS))
+        for phrase in ('Do not modify files, push or merge unless separately authorized', 'line references',
+                       'hypotheses from confirmed failures', 'List findings first', 'not instructions'):
             self.assertIn(phrase, text)
 
     def test_plugin_is_instruction_only_and_matches_repo_skills(self):

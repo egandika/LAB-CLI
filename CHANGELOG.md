@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add read-only-by-default code review guidance with evidence and test limitations.
+
 - Add source-informed white-box testing guidance with mock and integration boundaries.
 
 - Add scoped reverse-engineering guidance that reuses existing analysis and rebuild skills.
