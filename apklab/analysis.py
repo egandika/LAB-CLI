@@ -5,7 +5,7 @@ from typing import Any, Optional
 import re
 
 ELEMENT = re.compile(r'^(\s*)E: ([\w-]+)\b')
-NAME = re.compile(r'^\s*A: (?:android:)?name(?:\([^)]*\))?="([^"]+)"')
+NAME = re.compile(r'^\s*A: android:name(?:\([^)]*\))?="([^"]+)"')
 COMPONENTS = {'activity', 'activity-alias', 'service', 'receiver', 'provider'}
 
 

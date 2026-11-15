@@ -117,13 +117,13 @@ class SplitTypeCliTests(unittest.TestCase):
         before = first.read_bytes(); out = io.StringIO()
         with contextlib.redirect_stdout(out): code = main(['inspect', str(first), '--split-types', '--max-copy-mib', '1'])
         result = json.loads(out.getvalue())
-        self.assertEqual(code, 1); self.assertTrue(any('copy size limit' in x['detail'] for x in result['failures']))
+        self.assertEqual(code, 1); self.assertTrue(any('copy size limit' in x['detail'].lower() for x in result['failures']))
         self.assertEqual(first.read_bytes(), before)
         second = self.root / 'second.apk'; second.write_bytes(b'x' * 600000)
         first.write_bytes(b'x' * 600000); out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = main(['inspect', str(first), str(second), '--split-types', '--max-copy-total-mib', '1'])
-        self.assertEqual(code, 1); self.assertTrue(any('copy size limit' in x['detail'] for x in json.loads(out.getvalue())['failures']))
+        self.assertEqual(code, 1); self.assertTrue(any('copy size limit' in x['detail'].lower() for x in json.loads(out.getvalue())['failures']))
         with patch('apklab.cli.MAX_SPLIT_TYPE_INPUTS', 1), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(['inspect', str(first), str(second), '--split-types']), 1)
         out = io.StringIO()

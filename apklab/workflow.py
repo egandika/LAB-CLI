@@ -3,23 +3,26 @@
 from __future__ import annotations
 from typing import Any, Optional, Union
 from os import PathLike
-import shutil
 import os
 from pathlib import Path
 from .core import find_tool, run
+from .io_utils import (DEFAULT_MAX_COPY_BYTES, copy_file_bounded,
+                       file_size_limited, preflight_copy_inputs)
 from .publish import publish_new, staging
 
 
-def init(source: Union[str, PathLike], workspace: Union[str, PathLike]) -> str:
+def init(source: Union[str, PathLike], workspace: Union[str, PathLike],
+         max_copy_bytes: int=DEFAULT_MAX_COPY_BYTES) -> str:
     source = Path(source).resolve(strict=True)
     workspace = Path(workspace)
     if not source.is_file() or source.suffix.lower() != '.apk':
         raise ValueError('Source must be an APK file')
     if os.path.lexists(workspace): raise FileExistsError('Workspace already exists: ' + str(workspace))
+    preflight_copy_inputs([source], max_copy_bytes, max_copy_bytes)
     workspace.parent.mkdir(parents=True, exist_ok=True)
     with staging(workspace) as staged:
         staged.mkdir()
-        shutil.copy2(source, staged / 'original.apk')
+        copy_file_bounded(source, staged / 'original.apk', max_copy_bytes)
         publish_new(staged, workspace, directory=True)
     return str(workspace.resolve())
 
@@ -55,7 +58,7 @@ def supports_16k(tool: Any) -> bool:
     return bool(re.search(r'(?<!\w)-P(?:\s|,|<)', result['stdout'] + '\n' + result['stderr']))
 
 
-def perform(stage: str, workspace: Union[str, PathLike], source: Optional[Union[str, PathLike]]=None, output: Optional[Union[str, PathLike]]=None, keystore: Optional[Union[str, PathLike]]=None, alias: Optional[str]=None, pass_env: Optional[str]=None, page_size: int=4) -> tuple:
+def perform(stage: str, workspace: Union[str, PathLike], source: Optional[Union[str, PathLike]]=None, output: Optional[Union[str, PathLike]]=None, keystore: Optional[Union[str, PathLike]]=None, alias: Optional[str]=None, pass_env: Optional[str]=None, page_size: int=4, max_input_bytes: int=DEFAULT_MAX_COPY_BYTES) -> tuple:
     defaults = {'decode': 'decoded', 'jadx': 'jadx', 'build': 'rebuilt.apk', 'align': 'aligned.apk', 'sign': 'signed.apk'}
     root, dest = output_path(workspace, output or defaults[stage])
     toolname = {'decode': 'apktool', 'jadx': 'jadx', 'build': 'apktool', 'align': 'zipalign', 'sign': 'apksigner'}[stage]
@@ -66,6 +69,8 @@ def perform(stage: str, workspace: Union[str, PathLike], source: Optional[Union[
     src = (root / src).resolve() if not src.is_absolute() else src.resolve()
     if not src.is_relative_to(root) or not src.exists():
         raise ValueError('Input must exist inside workspace')
+    if stage in ('decode', 'jadx', 'align', 'sign'):
+        file_size_limited(src, max_input_bytes, 'Workflow APK input')
     with staging(dest) as staged:
         if stage == 'decode': args = [tool, 'd', str(src), '-o', str(staged)]
         elif stage == 'jadx':

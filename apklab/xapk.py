@@ -11,6 +11,7 @@ import shutil
 import stat
 import zipfile
 from pathlib import Path
+from .io_utils import DEFAULT_MAX_CONTAINER_INPUT_BYTES, file_size_limited
 
 MIB = 1024 * 1024
 MAX_FILES = 100000
@@ -83,7 +84,10 @@ def summarize(infos: Any) -> list:
              'kind': 'directory' if i.is_dir() else 'apk' if i.filename.lower().endswith('.apk') else 'obb' if i.filename.lower().endswith('.obb') else 'other'} for i in infos]
 
 
-def examine(path: Union[str, PathLike], max_entry: int, max_total: int, verify: bool=False) -> list:
+def examine(path: Union[str, PathLike], max_entry: int, max_total: int,
+            verify: bool=False,
+            max_archive_bytes: int=DEFAULT_MAX_CONTAINER_INPUT_BYTES) -> list:
+    file_size_limited(path, max_archive_bytes, 'Container archive input')
     with zipfile.ZipFile(path) as z:
         infos = validate(z, max_entry, max_total)
         items = summarize(infos)
@@ -93,7 +97,10 @@ def examine(path: Union[str, PathLike], max_entry: int, max_total: int, verify: 
         return items
 
 
-def unpack(path: Union[str, PathLike], destination: Union[str, PathLike], max_entry: int, max_total: int) -> list:
+def unpack(path: Union[str, PathLike], destination: Union[str, PathLike],
+           max_entry: int, max_total: int,
+           max_archive_bytes: int=DEFAULT_MAX_CONTAINER_INPUT_BYTES) -> list:
+    file_size_limited(path, max_archive_bytes, 'Container archive input')
     dest = Path(destination)
     # The archive is opened read-only; destination must not exist.
     with zipfile.ZipFile(path) as z:
@@ -149,10 +156,13 @@ def manifest_info(path: Union[str, PathLike], entries: Any, directory: bool=Fals
             'duplicate_references': sorted(x for x, count in Counter(filenames).items() if count > 1)}
 
 
-def repack(path: Union[str, PathLike], destination: Union[str, PathLike], replacements: Any, max_entry: int, max_total: int, *, update_manifest: bool=False) -> list:
+def repack(path: Union[str, PathLike], destination: Union[str, PathLike], replacements: Any,
+           max_entry: int, max_total: int, *, update_manifest: bool=False,
+           max_archive_bytes: int=DEFAULT_MAX_CONTAINER_INPUT_BYTES) -> list:
     """Copy a validated archive into a new XAPK, optionally replacing APK entries."""
     import copy
     from .core import validate_apk_archive
+    file_size_limited(path, max_archive_bytes, 'Container archive input')
     dest = Path(destination)
     with zipfile.ZipFile(path) as source:
         infos = validate(source, max_entry, max_total)
@@ -165,6 +175,7 @@ def repack(path: Union[str, PathLike], destination: Union[str, PathLike], replac
                 raise ValueError('Replacement target must be an existing APK entry: ' + entry)
             if not p.is_file() or p.suffix.lower() != '.apk':
                 raise ValueError('Replacement must be an APK file: ' + str(p))
+            file_size_limited(p, max_archive_bytes, 'Replacement APK input')
             with zipfile.ZipFile(p) as apk:
                 try:
                     validate_apk_archive(p, apk, max_entry, max_total)
@@ -274,15 +285,20 @@ def obb_layout(path: Union[str, PathLike], infos: Any) -> dict:
     return mapping
 
 
-def repack_directory(path: Union[str, PathLike], destination: Union[str, PathLike], replacements: Any, max_entry: int, max_total: int, *, update_manifest: bool=False) -> list:
+def repack_directory(path: Union[str, PathLike], destination: Union[str, PathLike],
+                     replacements: Any, max_entry: int, max_total: int, *,
+                     update_manifest: bool=False,
+                     max_archive_bytes: int=DEFAULT_MAX_CONTAINER_INPUT_BYTES) -> list:
     """Create a directory with new archive and strictly manifest-validated OBB layout."""
+    file_size_limited(path, max_archive_bytes, 'Container archive input')
     with zipfile.ZipFile(path) as z:
         infos = validate(z, max_entry, max_total)
         mapping = obb_layout(path, infos)
     dest = Path(destination)
     dest.mkdir(exist_ok=False)
     try:
-        items = repack(path, dest/'repacked.xapk', replacements, max_entry, max_total, update_manifest=update_manifest)
+        items = repack(path, dest/'repacked.xapk', replacements, max_entry, max_total,
+                       update_manifest=update_manifest, max_archive_bytes=max_archive_bytes)
         with zipfile.ZipFile(path) as z:
             infos = validate(z, max_entry, max_total)
             by_name = {i.filename: i for i in infos}

@@ -39,6 +39,15 @@ class WorkStagingTests(unittest.TestCase):
                 self.assertEqual(list(self.work.glob('.apklab-stage-*')), [])
         self.assertEqual(self.apk.read_bytes(), self.before)
 
+    def test_external_workflow_input_limit_blocks_tool(self):
+        source = self.work / 'large.apk'
+        source.write_bytes(b'x' * 1025)
+        with patch('apklab.workflow.find_tool', return_value='/tool'), patch('apklab.workflow.run') as run:
+            with self.assertRaisesRegex(ValueError, 'size limit'):
+                perform('decode', self.work, source='large.apk', output='blocked', max_input_bytes=1024)
+        run.assert_not_called()
+        self.assertFalse((self.work / 'blocked').exists())
+
     def test_wrong_type_and_racing_destination_are_not_overwritten(self):
         def wrong(args, **kwargs): Path(args[args.index('-o')+1]).write_text('not a directory'); return {'returncode':0,'stdout':'','stderr':''}
         with patch('apklab.workflow.find_tool', return_value='/tool'), patch('apklab.workflow.run', side_effect=wrong):

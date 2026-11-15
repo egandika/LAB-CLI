@@ -14,11 +14,11 @@ class InitStagingTests(unittest.TestCase):
         self.source.write_bytes(b'original')
 
     def test_partial_copy_never_publishes_and_original_error_is_preserved(self):
-        for func, module in ((lambda p: init(self.source, p), 'apklab.workflow.shutil.copy2'),
-                             (lambda p: init_set(p, [self.source]), 'apklab.splits.shutil.copyfile')):
+        for func, module in ((lambda p: init(self.source, p), 'apklab.workflow.copy_file_bounded'),
+                             (lambda p: init_set(p, [self.source]), 'apklab.splits.copy_file_bounded')):
             with self.subTest(module=module):
                 destination = self.root/'work'
-                def broken(source, target):
+                def broken(source, target, *args, **kwargs):
                     Path(target).write_bytes(b'partial')
                     raise OSError('original copy failure')
                 with patch(module, side_effect=broken):
@@ -28,9 +28,9 @@ class InitStagingTests(unittest.TestCase):
                 self.assertEqual(self.source.read_bytes(), b'original')
 
     def test_cleanup_failure_reports_both_original_and_cleanup_error(self):
-        def broken(source, target):
+        def broken(source, target, *args, **kwargs):
             Path(target).write_bytes(b'partial'); raise OSError('copy failure')
-        with patch('apklab.workflow.shutil.copy2', side_effect=broken), patch('apklab.publish.shutil.rmtree', side_effect=OSError('cleanup failure')):
+        with patch('apklab.workflow.copy_file_bounded', side_effect=broken), patch('apklab.publish.shutil.rmtree', side_effect=OSError('cleanup failure')):
             with self.assertRaisesRegex(RuntimeError, 'copy failure.*cleanup failure'):
                 init(self.source, self.root/'work')
         self.assertFalse((self.root/'work').exists())
@@ -38,10 +38,11 @@ class InitStagingTests(unittest.TestCase):
 
     def test_destination_created_during_copy_is_not_replaced(self):
         destination = self.root/'work'
-        def racing(source, target):
+        def racing(source, target, *args, **kwargs):
             Path(target).write_bytes(b'copy')
             destination.mkdir(); (destination/'other').write_text('preserve')
-        with patch('apklab.workflow.shutil.copy2', side_effect=racing):
+            return len(b'copy')
+        with patch('apklab.workflow.copy_file_bounded', side_effect=racing):
             with self.assertRaises(OSError): init(self.source, destination)
         self.assertEqual((destination/'other').read_text(), 'preserve')
         self.assertEqual(list(self.root.glob('.apklab-stage-*')), [])

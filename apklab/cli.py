@@ -18,6 +18,11 @@ from .splits import init_set, read_set
 from .setup_plan import plan as setup_guidance, goal_plan, GOALS, NEXT
 from .jadx import decompile
 from .analysis import parse_xmltree, candidates, magic_type
+from .io_utils import (DEFAULT_MAX_ARCHIVE_INPUT_BYTES,
+                       DEFAULT_MAX_CONTAINER_INPUT_BYTES,
+                       DEFAULT_MAX_COPY_BYTES, DEFAULT_MAX_TOTAL_COPY_BYTES,
+                       copy_file_bounded, file_size_limited,
+                       preflight_copy_inputs)
 from .split_metadata import assess_outputs, read_dependencies, read_split_types, report_split_types, unavailable_split_types
 
 
@@ -144,7 +149,6 @@ def inspect(args: argparse.Namespace, _report: Any) -> dict:
     if not getattr(args, 'split_types', False):
         return _inspect_inputs(args, _report)
     # All inspection, including external tools, runs on temporary copies.
-    import stat
     import tempfile
     with tempfile.TemporaryDirectory(prefix='apklab-split-types-') as tmp:
         originals = apk_paths(args.apks, args.recursive)
@@ -152,28 +156,20 @@ def inspect(args: argparse.Namespace, _report: Any) -> dict:
             raise ValueError('Split type input count exceeds 1000')
         per_file = args.max_copy_mib * MIB
         total_limit = args.max_copy_total_mib * MIB
-        if per_file < 1 or total_limit < 1:
-            raise ValueError('Copy size limits must be positive')
+        archive_limit = args.max_archive_mib * MIB
+        if per_file < 1 or total_limit < 1 or archive_limit < 1:
+            raise ValueError('Archive and copy size limits must be positive')
+        for source in originals:
+            file_size_limited(source, archive_limit, 'APK archive input')
+        preflight_copy_inputs(originals, per_file, total_limit)
         copied_total = 0
         copies = []
         replacements = {}
         for index, source in enumerate(originals):
             copy = Path(tmp) / ('input-%04d%s' % (index, source.suffix))
-            copied = 0
-            fd = os.open(source, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0))
-            with os.fdopen(fd, 'rb') as src, copy.open('xb') as dest:
-                info = os.fstat(src.fileno())
-                if not stat.S_ISREG(info.st_mode): raise ValueError('Split input must be a regular file')
-                if info.st_size > per_file or copied_total + info.st_size > total_limit:
-                    raise ValueError('Split type copy size limit exceeded')
-                while True:
-                    chunk = src.read(min(MIB, per_file - copied + 1, total_limit - copied_total + 1))
-                    if not chunk: break
-                    copied += len(chunk)
-                    copied_total += len(chunk)
-                    if copied > per_file or copied_total > total_limit:
-                        raise ValueError('Split type copy size limit exceeded')
-                    dest.write(chunk)
+            copied_total += copy_file_bounded(
+                source, copy, per_file, max_total_bytes=total_limit,
+                already_copied=copied_total)
             copies.append(str(copy))
             replacements[str(copy)] = str(source)
         staged = argparse.Namespace(**vars(args))
@@ -193,8 +189,10 @@ def inspect(args: argparse.Namespace, _report: Any) -> dict:
 def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['apks'] = []
+    max_archive_bytes = args.max_archive_mib * MIB
     for p in apk_paths(args.apks, args.recursive):
-        r['apks'].append(inspect_one(p, r, args.max_entry_mib * MIB, args.max_total_mib * MIB))
+        r['apks'].append(inspect_one(p, r, args.max_entry_mib * MIB,
+                                     args.max_total_mib * MIB, max_archive_bytes))
     if len(r['apks']) > 1:
         for field, label in [('package', 'package names'), ('version_code', 'version codes'), ('signer_sha256', 'signer certificate digest sets')]:
             values = [tuple(a[field]) if field == 'signer_sha256' and a[field] else a[field] for a in r['apks']]
@@ -216,7 +214,9 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
         add(r, 'not_tested', 'split set', 'Completeness, split dependencies, signer rotation compatibility and installation not verified')
     observations = []
     for item in r['apks']:
-        observations.append({'id': item['file'], 'apk': item, 'dependencies': read_dependencies(item['file'])})
+        dependencies = (read_dependencies(item['file']) if 'entries' in item else
+                        {'status': 'unavailable', 'reason': 'APK validation did not succeed'})
+        observations.append({'id': item['file'], 'apk': item, 'dependencies': dependencies})
     r['split_observations'] = observations
     r['split_analysis'] = assess_outputs(observations)
     for issue in r['split_analysis']['issues']: add(r, 'failures', 'split set', issue)
@@ -296,6 +296,10 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
 def xapk(args: argparse.Namespace, _report: Any) -> dict:
     from .publish import publish_new, staging
     r = _report
+    archive_limit = args.max_archive_mib * MIB
+    r['archive_input_bytes'] = file_size_limited(args.archive, archive_limit,
+                                                 'XAPK input archive')
+    r['archive_limit_bytes'] = archive_limit
     entry, total = args.max_entry_mib * MIB, args.max_total_mib * MIB
 
     def describe(entries, manifest_path, manifest_directory=False):
@@ -319,7 +323,7 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
         add(r, 'not_tested', 'XAPK layout', 'Manifest completeness, OBB compatibility and installation are not validated')
 
     if args.action == 'inspect':
-        entries = examine_xapk(args.archive, entry, total, args.verify)
+        entries = examine_xapk(args.archive, entry, total, args.verify, archive_limit)
         add(r, 'verified', 'XAPK', 'Archive directory and paths checked against safety limits')
         if args.verify:
             add(r, 'verified', 'XAPK', 'All file entries decompressed and CRC-checked; SHA-256 hashes recorded')
@@ -328,14 +332,14 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
         describe(entries, args.archive)
         if getattr(args, 'check_apks', False):
             from .xapk_checks import check_members
-            r['contained_apks'] = check_members(args.archive, r, entry, total)
+            r['contained_apks'] = check_members(args.archive, r, entry, total, archive_limit)
         return r
 
     destination = Path(args.destination)
     if os.path.lexists(destination): raise FileExistsError('Output already exists: ' + str(destination))
     with staging(destination) as staged:
         if args.action == 'unpack':
-            entries = unpack_xapk(args.archive, staged, entry, total)
+            entries = unpack_xapk(args.archive, staged, entry, total, archive_limit)
             describe(entries, staged, manifest_directory=True)
             if r['failures']: return r
             publish_new(staged, destination, directory=True)
@@ -347,8 +351,13 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
                 if not sep or not name or not replacement or name in replacements:
                     raise ValueError('Each --replace must be a unique ENTRY=FILE pair')
                 replacements[name] = replacement
-            entries = (repack_directory(args.archive, staged, replacements, entry, total, update_manifest=args.update_manifest)
-                       if args.directory else repack_xapk(args.archive, staged, replacements, entry, total, update_manifest=args.update_manifest))
+            entries = (repack_directory(args.archive, staged, replacements, entry, total,
+                                        update_manifest=args.update_manifest,
+                                        max_archive_bytes=archive_limit)
+                       if args.directory else
+                       repack_xapk(args.archive, staged, replacements, entry, total,
+                                   update_manifest=args.update_manifest,
+                                   max_archive_bytes=archive_limit))
             describe(entries, staged / 'repacked.xapk' if args.directory else staged)
             if args.update_manifest:
                 add(r, 'verified', 'XAPK manifest', 'Updated size and SHA-256 fields for replaced APK entries in supported split_apks manifest')
@@ -379,9 +388,41 @@ def agent(args: argparse.Namespace, _report: Any) -> dict:
 
 
 @reported
+def fuzz(args: argparse.Namespace, _report: Any) -> dict:
+    from .fuzzing import run_smoke
+    r = _report
+    result = run_smoke(args.seed, args.cases, args.max_input_mib * MIB)
+    r['fuzz'] = result
+    for failure in result['seed_failures']:
+        add(r, 'failures', failure['parser'],
+            'Synthetic seed was not accepted (seed {}, input SHA-256 {}): {}: {}'.format(
+                failure['seed'], failure['seed_sha256'], failure['exception_type'], failure['message']))
+    for finding in result['unexpected_exceptions']:
+        add(r, 'failures', finding['parser'],
+            'Unexpected {} at case {} (seed {}, input SHA-256 {}): {}'.format(
+                finding['exception_type'], finding['case'], finding['seed'],
+                finding['input_sha256'], finding['message']))
+    if not result['seed_failures'] and not result['unexpected_exceptions']:
+        add(r, 'verified', 'parser mutation smoke',
+            'Validated {} synthetic parser seeds and completed {} deterministic mutations across {} parser paths with no unexpected exceptions'.format(
+                result['seed_validation_count'], result['total_cases'], len(result['parsers'])))
+    for limitation in result['limitations']:
+        add(r, 'not_tested', 'parser fuzzing scope', limitation)
+    add(r, 'not_tested', 'parser fuzzing inputs',
+        'Only synthetic inputs were used; no app code or user APK was executed or fuzzed')
+    return r
+
+
+@reported
 def apks(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
-    entries = examine_xapk(args.archive, args.max_entry_mib * MIB, args.max_total_mib * MIB, args.verify)
+    archive_limit = args.max_archive_mib * MIB
+    r['archive_input_bytes'] = file_size_limited(args.archive, archive_limit,
+                                                 'APKS input archive')
+    r['archive_limit_bytes'] = archive_limit
+    entries = examine_xapk(args.archive, args.max_entry_mib * MIB,
+                           args.max_total_mib * MIB, args.verify,
+                           archive_limit)
     r['entries'] = entries
     add(r, 'verified', 'APKS archive', 'Listed validated ZIP directory entries and checked safe paths and limits')
     if args.verify: add(r, 'verified', 'APKS archive', 'Read all file entries and checked CRC; SHA-256 recorded per entry')
@@ -398,10 +439,17 @@ def apks(args: argparse.Namespace, _report: Any) -> dict:
 def diff(args: argparse.Namespace, _report: Any) -> dict:
     from .diff import snapshot, compare
     r = _report
-    old = snapshot(args.old, args.max_entry_mib * MIB, args.max_total_mib * MIB)
-    new = snapshot(args.new, args.max_entry_mib * MIB, args.max_total_mib * MIB)
+    max_archive_bytes = args.max_archive_mib * MIB
+    old = snapshot(args.old, args.max_entry_mib * MIB,
+                   args.max_total_mib * MIB, max_archive_bytes)
+    new = snapshot(args.new, args.max_entry_mib * MIB,
+                   args.max_total_mib * MIB, max_archive_bytes)
     r['diff'] = compare(old, new)
     r['metadata'] = {'old': old['metadata'], 'new': new['metadata']}
+    r['archive_inputs'] = {
+        'old': {'bytes': old['archive_input_bytes'], 'limit_bytes': old['archive_limit_bytes']},
+        'new': {'bytes': new['archive_input_bytes'], 'limit_bytes': new['archive_limit_bytes']},
+    }
     add(r, 'verified', 'APK diff', 'Compared per-entry SHA-256, compressed and uncompressed sizes of two CRC-checked ZIPs')
     for field in ('package', 'version_code', 'version_name'):
         a, b = old['metadata'].get(field), new['metadata'].get(field)
@@ -415,15 +463,19 @@ def diff(args: argparse.Namespace, _report: Any) -> dict:
 def inventory(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['files'] = []
+    r['archive_input_bytes'] = file_size_limited(
+        args.apk, args.max_archive_mib * MIB, 'APK archive input')
+    r['archive_limit_bytes'] = args.max_archive_mib * MIB
     with zipfile.ZipFile(args.apk) as z:
         infos = validate_apk_archive(args.apk, z, args.max_entry_mib * MIB, args.max_total_mib * MIB)
         matches = []
-        for info in infos:
+        for index, info in enumerate(infos):
             n = info.filename
             category = 'native' if n.startswith('lib/') and n.endswith('.so') else 'asset' if n.startswith(('assets/', 'res/')) else None
             if category and (not args.search or args.search.lower() in n.lower()):
-                matches.append(info)
-                r['files'].append({'path': n, 'size': info.file_size, 'category': category})
+                matches.append((index, info))
+                r['files'].append({'path': n, 'zip_entry_index': index,
+                                   'size': info.file_size, 'category': category})
         add(r, 'verified', 'inventory', 'Indexed matching ZIP entry names and sizes')
         if getattr(args, 'split_awareness', False):
             from .axml import MAX_MANIFEST, parse_manifest
@@ -446,7 +498,7 @@ def inventory(args: argparse.Namespace, _report: Any) -> dict:
                 add(r, 'not_tested', 'inventory split awareness', 'Manifest could not be examined')
             add(r, 'not_tested', 'inventory scope', 'Only this APK was inventoried; split completeness and isSplitRequired are not established')
         import hashlib
-        for info, item in zip(matches, r['files']):
+        for (_index, info), item in zip(matches, r['files']):
             if info.is_dir(): continue
             with z.open(info) as src:
                 prefix = src.read(16)
@@ -461,7 +513,7 @@ def inventory(args: argparse.Namespace, _report: Any) -> dict:
         if args.text:
             r['content_matches'] = []
             skipped = 0; scanned = 0; total_read = 0
-            for info, item in zip(matches, r['files']):
+            for (_index, info), item in zip(matches, r['files']):
                 if item['category'] != 'asset' or info.is_dir(): continue
                 if info.file_size > MIB or total_read + info.file_size > 32 * MIB:
                     skipped += 1; continue
@@ -474,7 +526,8 @@ def inventory(args: argparse.Namespace, _report: Any) -> dict:
                 scanned += 1
                 for number, line in enumerate(text.splitlines(), 1):
                     if args.text.casefold() in line.casefold():
-                        r['content_matches'].append({'path': info.filename, 'line': number, 'excerpt': line[:240]})
+                        r['content_matches'].append({'path': info.filename, 'zip_entry_index': item['zip_entry_index'],
+                                                     'line': number, 'excerpt': line[:240]})
                         if len(r['content_matches']) >= 200: break
                 if len(r['content_matches']) >= 200: break
             add(r, 'verified', 'asset text search', 'Searched ' + str(scanned) + ' UTF-8 entries, capped at 200 results')
@@ -485,7 +538,7 @@ def inventory(args: argparse.Namespace, _report: Any) -> dict:
             if not tool: add(r, 'not_tested', 'native details', 'readelf not found')
             else:
                 import shutil
-                for info, item in zip(matches, r['files']):
+                for (_index, info), item in zip(matches, r['files']):
                     if item['category'] != 'native': continue
                     with tempfile.TemporaryDirectory(prefix='apklab-native-') as tmp:
                         native = Path(tmp) / 'library.so'
@@ -505,6 +558,9 @@ def inventory(args: argparse.Namespace, _report: Any) -> dict:
 def dex(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['dex_files'] = []
+    r['archive_input_bytes'] = file_size_limited(
+        args.apk, args.max_archive_mib * MIB, 'APK archive input')
+    r['archive_limit_bytes'] = args.max_archive_mib * MIB
     with zipfile.ZipFile(args.apk) as z:
         infos = validate_apk_archive(args.apk, z, args.max_entry_mib * MIB, args.max_total_mib * MIB)
         dex_entries = [(index, info) for index, info in enumerate(infos) if re.fullmatch(r'classes(?:[2-9][0-9]*|1[0-9]+)?\.dex', info.filename)]
@@ -580,10 +636,14 @@ def dex(args: argparse.Namespace, _report: Any) -> dict:
 def work(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     if args.stage == 'init':
-        dest = init(args.apk, args.workspace)
-        add(r, 'verified', 'workspace', 'Copied input to ' + dest + '/original.apk')
+        dest = init(args.apk, args.workspace, args.max_copy_mib * MIB)
+        r['copied_bytes'] = (Path(dest) / 'original.apk').stat().st_size
+        r['copy_limit_bytes'] = args.max_copy_mib * MIB
+        add(r, 'verified', 'workspace', 'Copied input to ' + dest + '/original.apk within the configured per-file copy limit')
     elif args.stage == 'verify':
         src = workspace_input(args.workspace, args.input or 'signed.apk')
+        r['input_bytes'] = file_size_limited(src, args.max_input_mib * MIB, 'Verification APK input')
+        r['input_limit_bytes'] = args.max_input_mib * MIB
         r['checks'] = {}
         r['page_size_policy'] = 'Both 4 KiB and, when supported, 16 KiB ZIP checks are attempted; --page-size does not select verification checks'
         checks = [('zipalign', 'zipalign', ['-c', '-p', '4']),
@@ -628,9 +688,10 @@ def work(args: argparse.Namespace, _report: Any) -> dict:
             add(r, 'failures', 'ELF inspection', 'Could not inspect APK libraries: ' + str(exc))
         add(r, 'not_tested', 'runtime', 'Installability, ELF runtime compatibility, signature identity compatibility, and app behavior are not verified')
     else:
+        max_input_mib = getattr(args, 'max_input_mib', DEFAULT_MAX_COPY_BYTES // MIB)
         dest, result = perform(args.stage, args.workspace, args.input, args.output_path,
                                getattr(args, 'keystore', None), getattr(args, 'alias', None), getattr(args, 'pass_env', None),
-                               getattr(args, 'page_size', 4))
+                               getattr(args, 'page_size', 4), max_input_mib * MIB)
         add(r, 'verified', args.stage, 'Tool exited successfully and output exists: ' + dest)
         r['tool_output'] = result
         add(r, 'not_tested', 'output', 'Installability, runtime behavior, original signature compatibility and functionality are not verified')
@@ -640,8 +701,12 @@ def work(args: argparse.Namespace, _report: Any) -> dict:
 
 def jadx(args: argparse.Namespace) -> dict:
     r = report()
-    size, diagnostics = decompile(args.apk, args.output, args.timeout, args.max_output_mib * MIB, include_diagnostics=True)
+    size, diagnostics = decompile(args.apk, args.output, args.timeout, args.max_output_mib * MIB,
+                                  include_diagnostics=True,
+                                  max_input_bytes=args.max_input_mib * MIB)
     r['jadx_diagnostics'] = diagnostics
+    r['input_copy_bytes'] = diagnostics['input_copy_bytes']
+    r['input_limit_bytes'] = args.max_input_mib * MIB
     r['output'] = str(Path(args.output).resolve())
     r['output_bytes'] = size
     add(r, 'verified', 'jadx', 'JADX exited successfully on a temporary APK copy; output size was monitored')
@@ -650,15 +715,22 @@ def jadx(args: argparse.Namespace) -> dict:
 
 
 def device(args: argparse.Namespace) -> dict:
-    return install_test(args.serial, args.apks, args.confirm_install, args.launch)
+    return install_test(args.serial, args.apks, args.confirm_install, args.launch,
+                        args.max_copy_mib * MIB, args.max_copy_total_mib * MIB)
 
 
 @reported
 def splits(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     if args.action == 'init':
-        r['members'] = init_set(args.workspace, args.apks)
-        add(r, 'verified', 'split workspace', 'Copied APKs to new member workspaces and recorded SHA-256 digests')
+        r['members'] = init_set(args.workspace, args.apks,
+                                args.max_copy_mib * MIB,
+                                args.max_copy_total_mib * MIB)
+        r['copied_bytes'] = sum((Path(args.workspace) / member['id'] / 'original.apk').stat().st_size
+                                for member in r['members'])
+        r['copy_limits'] = {'max_per_file_bytes': args.max_copy_mib * MIB,
+                            'max_total_bytes': args.max_copy_total_mib * MIB}
+        add(r, 'verified', 'split workspace', 'Copied APKs to new member workspaces within configured size limits and recorded SHA-256 digests')
         add(r, 'not_tested', 'split set', 'Package, signature, base identity and completeness not checked; run inspect separately')
         return r
     root, members = read_set(args.workspace)
@@ -671,7 +743,9 @@ def splits(args: argparse.Namespace, _report: Any) -> dict:
         result = {'id': item['id'], 'source_name': item.get('source_name')}
         try:
             if args.stage == 'verify':
-                sub = work(argparse.Namespace(stage='verify', workspace=str(folder), input=None, page_size=args.page_size))
+                sub = work(argparse.Namespace(stage='verify', workspace=str(folder), input=None,
+                                              page_size=args.page_size,
+                                              max_input_mib=args.max_input_mib))
                 result['report'] = sub
                 if sub['failures']:
                     add(r, 'failures', item['id'], 'Verification reported failure')
@@ -680,7 +754,9 @@ def splits(args: argparse.Namespace, _report: Any) -> dict:
                 if sub['not_tested']:
                     add(r, 'not_tested', item['id'], 'See individual verification report for checks not performed')
             else:
-                dest, output = perform(args.stage, str(folder), None, None, args.keystore, args.alias, args.pass_env, args.page_size)
+                dest, output = perform(args.stage, str(folder), None, None, args.keystore,
+                                       args.alias, args.pass_env, args.page_size,
+                                       args.max_input_mib * MIB)
                 result.update(output=dest, tool_output=output)
                 add(r, 'verified', item['id'], args.stage + ' tool returned success and output exists')
         except PartialReportError as e:
@@ -695,8 +771,10 @@ def splits(args: argparse.Namespace, _report: Any) -> dict:
             observed = {'id': item['id']}
             try:
                 signed = workspace_input(str(folder), 'signed.apk')
+                file_size_limited(signed, args.max_input_mib * MIB, 'Verification APK input')
                 details = report()
-                observed['apk'] = inspect_one(signed, details)
+                observed['apk'] = inspect_one(
+                    signed, details, max_archive_bytes=args.max_input_mib * MIB)
                 observed['report'] = details
                 if details['failures']:
                     add(r, 'failures', item['id'], 'Signed output inspection failed; see member inspection report')
@@ -728,6 +806,9 @@ def splits(args: argparse.Namespace, _report: Any) -> dict:
 
 
 def zip_limits(p: argparse.ArgumentParser) -> None:
+    p.add_argument('--max-archive-mib', type=int,
+                   default=DEFAULT_MAX_ARCHIVE_INPUT_BYTES // MIB,
+                   help='Maximum physical APK archive size in MiB (default 1024)')
     p.add_argument('--max-entry-mib', type=int, default=64, help='Max uncompressed entry size in MiB (default 64)')
     p.add_argument('--max-total-mib', type=int, default=512, help='Max total uncompressed size in MiB (default 512)')
 
@@ -779,6 +860,9 @@ def parser() -> argparse.ArgumentParser:
         else:
             x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
             x.add_argument('--check-apks', action='store_true', help='Inspect bounded copies of contained APKs and declared size/SHA-256')
+        x.add_argument('--max-archive-mib', type=int,
+                       default=DEFAULT_MAX_CONTAINER_INPUT_BYTES // MIB,
+                       help='Maximum physical XAPK archive size in MiB (default 9216)')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
         x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
     q = cmd('agent', 'Provide non-executing structured agent guidance', agent)
@@ -794,12 +878,19 @@ def parser() -> argparse.ArgumentParser:
     i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('--goal', required=True, choices=goals)
     i.add_argument('--kind', required=True, choices=kinds)
+    q = cmd('fuzz', 'Run bounded deterministic mutations on synthetic parser inputs', fuzz)
+    q.add_argument('--seed', type=int, default=20261114, help='Deterministic mutation seed')
+    q.add_argument('--cases', type=int, default=256, help='Cases per parser (1-10000)')
+    q.add_argument('--max-input-mib', type=int, default=1, help='Per-input cap (1-8 MiB)')
     q = cmd('apks', 'Inspect an APK set archive without extracting or selecting splits', apks)
     actions = q.add_subparsers(dest='action', required=True)
     i = actions.add_parser('inspect', help='List APK set ZIP contents')
     i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('archive'); i.add_argument('--verify', action='store_true', help='Read all entries and check CRC')
+    i.add_argument('--max-archive-mib', type=int,
+                   default=DEFAULT_MAX_CONTAINER_INPUT_BYTES // MIB,
+                   help='Maximum physical APKS archive size in MiB (default 9216)')
     i.add_argument('--max-entry-mib', type=int, default=2048); i.add_argument('--max-total-mib', type=int, default=8192)
     q = cmd('diff', 'Compare two APK ZIPs without modifying them', diff)
     q.add_argument('old'); q.add_argument('new')
@@ -821,37 +912,59 @@ def parser() -> argparse.ArgumentParser:
     q.add_argument('apk'); q.add_argument('output')
     q.add_argument('--timeout', type=int, default=600, help='Timeout in seconds (default 600)')
     q.add_argument('--max-output-mib', type=int, default=128, help='Best-effort monitored output cap in MiB (default 128)')
+    q.add_argument('--max-input-mib', type=int, default=DEFAULT_MAX_COPY_BYTES // MIB,
+                   help='Maximum physical size of the temporary APK input copy in MiB (default 512)')
     q = cmd('splits', 'Copy-based multi-APK split workflows', splits)
     actions = q.add_subparsers(dest='action', required=True)
     i = actions.add_parser('init', help='Copy APKs into a new split workspace')
     i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--max-copy-mib', type=int, default=DEFAULT_MAX_COPY_BYTES // MIB,
+                   help='Maximum physical size per copied APK in MiB (default 512)')
+    i.add_argument('--max-copy-total-mib', type=int, default=DEFAULT_MAX_TOTAL_COPY_BYTES // MIB,
+                   help='Maximum aggregate physical size of copied APKs in MiB (default 2048)')
     i.add_argument('workspace'); i.add_argument('apks', nargs='+')
     s = actions.add_parser('run', help='Run a stage for each APK copy')
     s.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
     s.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     s.add_argument('workspace'); s.add_argument('stage', choices=('decode', 'build', 'align', 'sign', 'verify'))
     s.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Select ZIP alignment for align; verify attempts both 4 and 16 KiB regardless')
+    s.add_argument('--max-input-mib', type=int, default=DEFAULT_MAX_COPY_BYTES // MIB,
+                   help='Maximum size of APK inputs for stages that read an APK (default 512 MiB)')
     s.add_argument('--keystore'); s.add_argument('--alias'); s.add_argument('--pass-env')
     q = cmd('device', 'Opt-in installation test on a disposable emulator', device)
     q.add_argument('--serial', required=True, help='Explicit emulator-NNNN serial (physical devices refused)')
     q.add_argument('--confirm-install', action='store_true', help='Confirm installation changes emulator state')
     q.add_argument('--launch', action='store_true', help='Also send one launcher event (executes app code)')
+    q.add_argument('--max-copy-mib', type=int, default=DEFAULT_MAX_COPY_BYTES // MIB,
+                   help='Maximum physical size per temporary APK copy in MiB (default 512)')
+    q.add_argument('--max-copy-total-mib', type=int, default=DEFAULT_MAX_TOTAL_COPY_BYTES // MIB,
+                   help='Maximum aggregate physical size of temporary APK copies in MiB (default 2048)')
     q.add_argument('apks', nargs='+', help='APK files to copy and install, including base and all needed splits')
     q = cmd('work', 'Copy-based decode/JADX/build/align/sign/verify workflow', work)
     stages = q.add_subparsers(dest='stage', required=True)
-    i = stages.add_parser('init', help='Copy APK to a new workspace'); i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS); i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS); i.add_argument('apk'); i.add_argument('workspace')
+    i = stages.add_parser('init', help='Copy APK to a new workspace')
+    i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--max-copy-mib', type=int, default=DEFAULT_MAX_COPY_BYTES // MIB,
+                   help='Maximum physical size of the initial APK copy in MiB (default 512)')
+    i.add_argument('apk'); i.add_argument('workspace')
     v = stages.add_parser('verify', help='Check alignment and signature of an APK in the workspace')
     v.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
     v.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
     v.add_argument('workspace'); v.add_argument('--input', help='APK inside workspace (default signed.apk)')
     v.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Compatibility option only: verify attempts both 4 and 16 KiB ZIP alignment checks regardless')
+    v.add_argument('--max-input-mib', type=int, default=DEFAULT_MAX_COPY_BYTES // MIB,
+                   help='Maximum physical size of the APK to verify in MiB (default 512)')
     for stage in ('decode', 'jadx', 'build', 'align', 'sign'):
         s = stages.add_parser(stage, help=stage + ' within an APKLab workspace')
         s.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
         s.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
         s.add_argument('workspace'); s.add_argument('--input', help='Input path inside workspace')
         s.add_argument('--output', dest='output_path', help='New output path inside workspace')
+        if stage in ('decode', 'jadx', 'align', 'sign'):
+            s.add_argument('--max-input-mib', type=int, default=DEFAULT_MAX_COPY_BYTES // MIB,
+                           help='Maximum physical size of input APK in MiB (default 512)')
         if stage == 'align': s.add_argument('--page-size', type=int, choices=(4, 16), default=4, help='Native library ZIP alignment in KiB (default 4)')
         if stage == 'sign':
             s.add_argument('--keystore', required=True); s.add_argument('--alias', required=True)

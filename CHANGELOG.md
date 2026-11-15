@@ -6,7 +6,13 @@
 
 - Add dedicated, guidance-only black-box testing and bounded parser-fuzzing methods; do not imply current device support is full dynamic analysis or that smoke mutations are coverage-guided fuzzing.
 
-- Add a deterministic synthetic AXML/DEX and in-memory ZIP mutation smoke harness with seed, case, and input caps; it executes no APK code and adds no dependency.
+- Add the opt-in `apklab fuzz` command for bounded deterministic mutations across six synthetic parser paths; validate baseline seeds and report input digests without executing APK code or claiming coverage-guided fuzzing.
+
+- Enforce configurable physical input caps for APK and XAPK/APKS archives separately from uncompressed ZIP limits, and bounded per-file/aggregate copies for workspace, split, JADX, and device workflows.
+
+- Preserve ZIP entry indices in inventory evidence and reject ambiguous duplicate-name APK diffs rather than choosing an entry silently.
+
+- Require the Android namespace for AAPT permission, component, and split-metadata attributes to avoid treating similarly named custom attributes as Android declarations.
 
 - Report malformed deflate streams with the affected ZIP entry instead of surfacing an unscoped low-level zlib error.
 

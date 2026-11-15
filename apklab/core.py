@@ -16,6 +16,7 @@ import time
 import signal
 import zipfile
 from pathlib import Path
+from .io_utils import DEFAULT_MAX_ARCHIVE_INPUT_BYTES, file_size_limited
 
 MAX_ENTRY = 64 * 1024 * 1024
 MAX_TOTAL = 512 * 1024 * 1024
@@ -294,13 +295,18 @@ def validate_apk_archive(path: Union[str, PathLike], z: Any, max_entry: int=MAX_
     return infos
 
 
-def inspect_one(path: Union[str, PathLike], r: Any, max_entry: int=MAX_ENTRY, max_total: int=MAX_TOTAL) -> dict:
+def inspect_one(path: Union[str, PathLike], r: Any, max_entry: int=MAX_ENTRY,
+                max_total: int=MAX_TOTAL,
+                max_archive_bytes: int=DEFAULT_MAX_ARCHIVE_INPUT_BYTES) -> dict:
     path = Path(path)
     item = {"file": str(path), "package": None, "version_name": None, "version_code": None, "architectures": [], "signer_sha256": None}
     if path.suffix.lower() == '.xapk':
         add(r, "failures", str(path), "XAPK is an archive, not an APK; use apklab xapk inspect or unpack")
         return item
     try:
+        item['archive_input_bytes'] = file_size_limited(
+            path, max_archive_bytes, 'APK archive input')
+        item['archive_limit_bytes'] = max_archive_bytes
         with zipfile.ZipFile(path) as z:
             infos = validate_apk_archive(path, z, max_entry, max_total)
             add(r, "verified", str(path), "ZIP entries passed CRC checks")

@@ -4,10 +4,10 @@ from __future__ import annotations
 from typing import Any, Optional, Union
 from os import PathLike
 import os
-import shutil
 import tempfile
 from pathlib import Path
 from .core import find_tool, run
+from .io_utils import DEFAULT_MAX_COPY_BYTES, copy_file_bounded, file_size_limited
 from .publish import publish_new, staging
 
 
@@ -27,19 +27,20 @@ def directory_size(root: Union[str, PathLike], max_bytes: Optional[int]=None) ->
     return size
 
 
-def decompile(apk: Union[str, PathLike], destination: Union[str, PathLike], timeout: int, max_bytes: int, *, include_diagnostics: bool=False) -> Any:
+def decompile(apk: Union[str, PathLike], destination: Union[str, PathLike], timeout: int, max_bytes: int, *, include_diagnostics: bool=False, max_input_bytes: int=DEFAULT_MAX_COPY_BYTES) -> Any:
     if timeout < 1 or max_bytes < 1: raise ValueError('Timeout and size limit must be positive')
-    tool = find_tool('jadx')
-    if not tool: raise ValueError('jadx not found; run apklab doctor')
     source = Path(apk).resolve(strict=True)
     if not source.is_file() or source.suffix.lower() != '.apk': raise ValueError('Input must be an APK file')
+    file_size_limited(source, max_input_bytes, 'JADX input')
+    tool = find_tool('jadx')
+    if not tool: raise ValueError('jadx not found; run apklab doctor')
     dest = Path(destination)
     if os.path.lexists(dest): raise FileExistsError('Output already exists: ' + str(dest))
     with staging(dest) as staged:
         staged.mkdir()
         with tempfile.TemporaryDirectory(prefix='apklab-jadx-') as tmp:
             copied = Path(tmp) / 'input.apk'
-            shutil.copyfile(source, copied)
+            input_bytes = copy_file_bounded(source, copied, max_input_bytes)
             def monitor():
                 if directory_size(staged, max_bytes) > max_bytes: raise RuntimeError('JADX output exceeded size limit')
             result = run([tool, '--no-res', '-d', str(staged.resolve()), str(copied)], timeout=timeout, monitor=monitor)
@@ -54,6 +55,7 @@ def decompile(apk: Union[str, PathLike], destination: Union[str, PathLike], time
             if size > max_bytes: raise RuntimeError('JADX output exceeded size limit')
             publish_new(staged, dest, directory=True)
             diagnostic = result.get('stderr', '')
-            details = {'stderr': diagnostic[:4000],
+            details = {'input_copy_bytes': input_bytes,
+                       'stderr': diagnostic[:4000],
                        'stderr_truncated': len(diagnostic) > 4000 or bool(result.get('stderr_truncated'))}
             return (size, details) if include_diagnostics else size
