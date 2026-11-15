@@ -1,4 +1,5 @@
 """Structural checks do not imply real agent discovery or compliance."""
+import json
 import re
 import unittest
 from pathlib import Path
@@ -23,6 +24,19 @@ class AgentSkillTests(unittest.TestCase):
                 self.assertTrue(parts[2].strip())
                 self.assertNotIn('allowed-tools:', parts[1])
                 self.assertNotIn('hooks:', parts[1])
+    def test_plugin_is_instruction_only_and_matches_repo_skills(self):
+        plugin = ROOT/'agent-plugin'
+        manifest = json.loads((plugin/'plugin.json').read_text(encoding='utf-8'))
+        self.assertEqual(manifest['$schema'], 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json')
+        self.assertEqual(manifest['name'], 'apklab-agent-kit')
+        self.assertEqual(set(manifest), {'$schema', 'name', 'version', 'description'})
+        self.assertEqual(set(p.name for p in (plugin/'skills').iterdir()), set(SKILLS))
+        self.assertEqual(set(p.name for p in plugin.iterdir()), {'plugin.json', 'skills'})
+        for name in SKILLS:
+            skill = plugin/'skills'/name
+            self.assertEqual([p.name for p in skill.iterdir()], ['SKILL.md'])
+            self.assertEqual((skill/'SKILL.md').read_bytes(), (ROOT/'.agents/skills'/name/'SKILL.md').read_bytes())
+
     def test_supporting_guides_are_linked_and_explain_limits(self):
         readme = (ROOT/'README.md').read_text(encoding='utf-8')
         for name in ('capability-guide.md', 'troubleshooting.md', 'session-template.md'):

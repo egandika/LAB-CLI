@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "apklab-agent-kit",
+  "version": "0.1.0",
+  "description": "Instruction-only workflows for evidence-oriented APKLab use."
+}

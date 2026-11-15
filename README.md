@@ -75,6 +75,10 @@ Separate verified results, inferences, failures, and untested items. Do not clai
 
 Repo-local instruction-only skills in `.agents/skills/` help with triage, investigation, reporting, split analysis, copy-based workflows, error diagnosis, and repo maintenance. Compatible agents may discover them when working in this checkout; activation is platform-dependent and not guaranteed. Agents without skill support can read the relevant `SKILL.md` explicitly. Skills do not grant tools, enforce permissions, or make AI results automatically correct. Review `AGENTS.md` and ask before setup or state-changing actions. Supporting guides: [capability map](docs/agent/capability-guide.md), [troubleshooting](docs/agent/troubleshooting.md), and [session handoff](docs/agent/session-template.md).
 
+### Optional agent plugin package
+
+`agent-plugin/` contains an instruction-only Agent Plugins 1.0-style package of the same skills. It has no hooks, MCP server, executable scripts or pre-approved tools. Client support and installation methods vary; inspect the package and your client's documentation before installing or enabling it, and obtain user approval first. It has not been tested with a real plugin host. The repo skills remain the source of truth; tests check that plugin copies match them. A plugin does not install APKLab or grant terminal access.
+
 ## Tool discovery and setup
 
 ```sh
