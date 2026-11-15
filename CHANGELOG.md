@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add instruction-only skills for split analysis, copy-based workflows, error diagnosis and repository maintenance.
+
 - Add instruction-only agent skills for APKLab triage, static investigation and evidence reporting.
 
 - Clarify agent permission, evidence and untrusted-input guidance; align the copyable prompt with setup approval.

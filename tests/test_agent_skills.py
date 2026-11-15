@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ('apklab-triage', 'apklab-investigate', 'apklab-report')
+SKILLS = ('apklab-triage', 'apklab-investigate', 'apklab-report',
+          'apklab-split-check', 'apklab-rebuild', 'apklab-error-triage', 'apklab-repo-maintenance')
 
 
 class AgentSkillTests(unittest.TestCase):
@@ -22,6 +23,15 @@ class AgentSkillTests(unittest.TestCase):
                 self.assertTrue(parts[2].strip())
                 self.assertNotIn('allowed-tools:', parts[1])
                 self.assertNotIn('hooks:', parts[1])
+    def test_extended_workflows_retain_safety_boundaries(self):
+        base = ROOT / '.agents/skills'
+        for name, phrase in (('apklab-split-check', 'never proves installability'),
+                             ('apklab-rebuild', 'Never request credentials'),
+                             ('apklab-error-triage', 'Exit 3 means'),
+                             ('apklab-repo-maintenance', 'synthetic or mock')):
+            with self.subTest(skill=name):
+                self.assertIn(phrase, (base/name/'SKILL.md').read_text(encoding='utf-8'))
+
     def test_relevant_skill_risks_are_documented(self):
         base = ROOT / '.agents/skills'
         triage = (base/'apklab-triage/SKILL.md').read_text(encoding='utf-8')

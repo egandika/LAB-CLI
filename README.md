@@ -73,7 +73,7 @@ Separate verified results, inferences, failures, and untested items. Do not clai
 
 ### Agent skills
 
-Repo-local instruction-only skills in `.agents/skills/` help with initial triage, static investigation, and evidence reporting. Compatible agents may discover them when working in this checkout; activation is platform-dependent and not guaranteed. Agents without skill support can read the relevant `SKILL.md` explicitly. Skills do not grant tools, enforce permissions, or make AI results automatically correct. Review `AGENTS.md` and ask before setup or state-changing actions.
+Repo-local instruction-only skills in `.agents/skills/` help with triage, investigation, reporting, split analysis, copy-based workflows, error diagnosis, and repo maintenance. Compatible agents may discover them when working in this checkout; activation is platform-dependent and not guaranteed. Agents without skill support can read the relevant `SKILL.md` explicitly. Skills do not grant tools, enforce permissions, or make AI results automatically correct. Review `AGENTS.md` and ask before setup or state-changing actions.
 
 ## Tool discovery and setup
 
