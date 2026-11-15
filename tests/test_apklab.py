@@ -96,6 +96,23 @@ class Tests(unittest.TestCase):
         p.write_bytes(raw)
         code, r = self.call('inspect', str(p))
         self.assertEqual(code, 1); self.assertTrue(any('CRC' in x['detail'] for x in r['failures']))
+
+    def test_corrupt_deflate_stream_reports_the_entry(self):
+        p = self.root / 'corrupt-deflate.apk'
+        payload = b'APKLab synthetic CRC/decompression regression ' * 100
+        with zipfile.ZipFile(p, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('AndroidManifest.xml', payload)
+        raw = bytearray(p.read_bytes())
+        with zipfile.ZipFile(p) as archive:
+            info = archive.getinfo('AndroidManifest.xml')
+        name_length, extra_length = struct.unpack_from('<HH', raw, info.header_offset + 26)
+        data_offset = info.header_offset + 30 + name_length + extra_length
+        raw[data_offset] ^= 0xff
+        p.write_bytes(raw)
+        code, result = self.call('inspect', str(p))
+        self.assertEqual(code, 1)
+        self.assertTrue(any('ZIP CRC/decompression failure: AndroidManifest.xml' in item['detail']
+                            for item in result['failures']), result['failures'])
     def test_real_readelf(self):
         import shutil
         if not shutil.which('readelf') or not Path('/bin/true').is_file():

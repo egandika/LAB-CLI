@@ -275,7 +275,8 @@ def check_zip_crc(z: Any, infos: Any) -> Optional[str]:
             with z.open(info) as entry:
                 while entry.read(1024 * 1024):
                     pass
-        except zipfile.BadZipFile:
+        except (zipfile.BadZipFile, zlib.error):
+            # CRC mismatches and malformed deflate streams are both failures for this entry.
             return info.filename
     return None
 
@@ -289,7 +290,7 @@ def validate_apk_archive(path: Union[str, PathLike], z: Any, max_entry: int=MAX_
     if len(manifests) != 1:
         raise ValueError('APK must contain exactly one AndroidManifest.xml')
     bad = check_zip_crc(z, infos)
-    if bad: raise ValueError('ZIP CRC failure: ' + bad)
+    if bad: raise ValueError('ZIP CRC/decompression failure: ' + bad)
     return infos
 
 

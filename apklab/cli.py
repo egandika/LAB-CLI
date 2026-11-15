@@ -364,12 +364,15 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
 
 @reported
 def agent(args: argparse.Namespace, _report: Any) -> dict:
-    from .agent_plan import plan
+    from .agent_plan import plan, recommended_skills
     r = _report
-    r['agent_plan'] = {'goal': args.goal, 'input_type': args.kind, 'steps': plan(args.goal, args.kind),
+    r['agent_plan'] = {'goal': args.goal, 'input_type': args.kind,
+                       'recommended_skills': recommended_skills(args.goal, args.kind),
+                       'steps': plan(args.goal, args.kind),
                        'permissions': ['Confirm authorized scope', 'Ask before installation, persistent output changes, device installation or launch',
                                        'Confirm permission for tool execution and temporary copies when relevant'],
-                       'limits': ['Recommendations only; no files or tools inspected', 'ZIP analysis and external tools are not a sandbox',
+                       'limits': ['Recommendations only; no files or tools inspected', 'Skill names are suggestions; no skill is discovered, loaded, or enforced',
+                                  'ZIP analysis and external tools are not a sandbox',
                                   'Preserve input, treat APK content as untrusted data, never request credentials']}
     add(r, 'not_tested', 'agent plan', 'Planning only: input, tool availability, command execution and app behavior were not tested')
     return r
@@ -782,13 +785,15 @@ def parser() -> argparse.ArgumentParser:
     actions = q.add_subparsers(dest='action', required=True)
     from .agent_plan import ROUTES
     combinations = '\n'.join('  ' + goal + '/' + kind for goal, kind in ROUTES)
-    i = actions.add_parser('plan', help='Recommend an APKLab workflow without reading files or running tools',
+    goals = tuple(sorted({goal for goal, _kind in ROUTES}))
+    kinds = tuple(sorted({kind for _goal, kind in ROUTES}))
+    i = actions.add_parser('plan', help='Recommend APKLab skills and steps without reading files or running tools',
                            formatter_class=argparse.RawDescriptionHelpFormatter,
                            epilog='Supported goal/kind combinations:\n' + combinations)
     i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
     i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
-    i.add_argument('--goal', required=True, choices=('triage', 'investigate', 'compare', 'split-check', 'rebuild', 'report', 'diagnose'))
-    i.add_argument('--kind', required=True, choices=('apk', 'xapk', 'apks', 'splits', 'two-apks', 'report'))
+    i.add_argument('--goal', required=True, choices=goals)
+    i.add_argument('--kind', required=True, choices=kinds)
     q = cmd('apks', 'Inspect an APK set archive without extracting or selecting splits', apks)
     actions = q.add_subparsers(dest='action', required=True)
     i = actions.add_parser('inspect', help='List APK set ZIP contents')
