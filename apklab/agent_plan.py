@@ -16,8 +16,8 @@ ROUTES = {
     ('split-check', 'apks'): [('apks inspect', 'Inventory APK set; targeting is not parsed')],
     ('rebuild', 'apk'): [('work init', 'Create an explicitly approved new workspace'), ('work', 'Follow requested decode, edit, build, align, sign and verify stages')],
     ('rebuild', 'splits'): [('splits init', 'Create an explicitly approved split workspace'), ('splits run', 'Follow requested stages and review each member')],
-    ('report', 'report'): [('interpret report', 'Separate verified, inferences, failures and not_tested')],
-    ('diagnose', 'report'): [('interpret report', 'Review sanitized error and unknown checks before suggesting a next step')],
+    ('report', 'report'): [(None, 'Separate verified, inferences, failures and not_tested in the supplied report')],
+    ('diagnose', 'report'): [(None, 'Review sanitized error and unknown checks before suggesting a next step')],
 }
 
 
@@ -25,4 +25,5 @@ def plan(goal: str, kind: str) -> List[dict]:
     """Return recommendations only; do not read files, discover tools or run commands."""
     if (goal, kind) not in ROUTES:
         raise ValueError('Unsupported goal and input type combination; consult agent plan --help')
-    return [{'command': command, 'purpose': purpose} for command, purpose in ROUTES[(goal, kind)]]
+    return [{'type': 'command' if command is not None else 'guidance',
+             'command': command, 'purpose': purpose} for command, purpose in ROUTES[(goal, kind)]]

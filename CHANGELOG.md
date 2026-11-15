@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Distinguish non-executable guidance from real command names in structured agent plans.
+
 - Make baseline agent instructions goal-directed and consistent about permission for probes and extraction.
 
 - Link the triage skill to structured planning and clarify report option placement.

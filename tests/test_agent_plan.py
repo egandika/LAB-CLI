@@ -26,6 +26,21 @@ class AgentPlanTests(unittest.TestCase):
         self.assertEqual(plan('triage', 'apks')[0]['command'], 'apks inspect')
         code, report = self.call('--goal', 'compare', '--kind', 'xapk')
         self.assertEqual(code, 1); self.assertIn('Unsupported', report['failures'][0]['detail'])
+    def test_guidance_is_not_a_fake_executable_command(self):
+        for goal in ('report', 'diagnose'):
+            with self.subTest(goal=goal):
+                _, result = self.call('--goal', goal, '--kind', 'report')
+                step = result['agent_plan']['steps'][0]
+                self.assertEqual(step['type'], 'guidance')
+                self.assertIsNone(step['command'])
+        for steps in (plan(goal, kind) for goal, kind in ROUTES):
+            for step in steps:
+                if step['type'] == 'command':
+                    self.assertIsInstance(step['command'], str)
+                    with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as result:
+                        main(step['command'].split() + ['--help'])
+                    self.assertEqual(result.exception.code, 0, step['command'])
+
     def test_help_lists_supported_goal_kind_pairs(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as result:

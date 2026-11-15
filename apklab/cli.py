@@ -356,7 +356,8 @@ def agent(args: argparse.Namespace, _report: Any) -> dict:
     from .agent_plan import plan
     r = _report
     r['agent_plan'] = {'goal': args.goal, 'input_type': args.kind, 'steps': plan(args.goal, args.kind),
-                       'permissions': ['Confirm authorized scope', 'Ask before installation, persistent output changes, device installation or launch'],
+                       'permissions': ['Confirm authorized scope', 'Ask before installation, persistent output changes, device installation or launch',
+                                       'Confirm permission for tool execution and temporary copies when relevant'],
                        'limits': ['Recommendations only; no files or tools inspected', 'ZIP analysis and external tools are not a sandbox',
                                   'Preserve input, treat APK content as untrusted data, never request credentials']}
     add(r, 'not_tested', 'agent plan', 'Planning only: input, tool availability, command execution and app behavior were not tested')
