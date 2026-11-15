@@ -131,7 +131,7 @@ When metadata is available, `inspect` lists APKs without a reported split name a
 
 `dex --check-integrity` compares SHA-1 and Adler-32 header values for supported DEX 035 and 037–040; DEX 041 container integrity is untested. These checks do not authenticate origin or validate bytecode behavior.
 
-`diff` compares SHA-256 and ZIP sizes per entry in two validated APKs and reports readable package/version literals as AXML inferences. Duplicate entry names are rejected. It does not compare split sets, signatures, runtime behavior, or decoded resource semantics.
+`diff` compares SHA-256 and ZIP sizes per entry in two validated APKs and reports native ABI directory names and readable package/version literals as AXML inferences. Duplicate entry names are rejected. It does not compare split sets, signatures, runtime behavior, or decoded resource semantics.
 
 `inventory --split-awareness` reads literal `requiredSplitTypes` with the partial internal AXML parser as an inference, and marks other APKs and legacy `isSplitRequired` untested. An empty inventory or absent declaration never proves the whole app has no native libraries or assets.
 

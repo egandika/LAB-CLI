@@ -380,7 +380,7 @@ def diff(args: argparse.Namespace, _report: Any) -> dict:
         a, b = old['metadata'].get(field), new['metadata'].get(field)
         if a is None or b is None: add(r, 'not_tested', 'APK diff metadata', field + ' was unavailable in at least one APK')
         else: add(r, 'inferences', 'APK diff metadata', field + (' matches' if a == b else ' differs') + ' based on internal AXML')
-    add(r, 'not_tested', 'APK diff', 'Behavior, signatures, split-set equivalence and semantic resource changes are not established')
+    add(r, 'not_tested', 'APK diff', 'ABI directory names do not prove compatibility; behavior, signatures, split-set equivalence and semantic resource changes are not established')
     return r
 
 
