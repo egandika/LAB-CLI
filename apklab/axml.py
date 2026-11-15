@@ -34,7 +34,8 @@ def parse_manifest(data: bytes) -> dict:
     count = 0
     result = {'package': None, 'version_code': None, 'version_name': None,
               'permissions': [], 'components': [], 'unresolved': [],
-              'split_type_attributes': {}, 'split_identity': {'status': 'absent'}}
+              'split_type_attributes': {}, 'split_identity': {'status': 'absent'},
+              'security': {'application': {}, 'components': []}}
     def string(index):
         if index == NONE: return None
         if strings is None or index >= len(strings): raise ValueError('Invalid AXML string index')
@@ -99,6 +100,7 @@ def parse_manifest(data: bytes) -> dict:
             attrs = {}
             types = {}
             typed_strings = {}
+            typed_values = {}
             for i in range(nattrs):
                 p = off + 16 + attrstart + i * attrsize
                 ans, aname, raw, vsize, res0, vtype, value = struct.unpack_from('<IIIHBBI', data, p)
@@ -113,11 +115,28 @@ def parse_manifest(data: bytes) -> dict:
                 if raw_value is not None and vtype in (3, 0x10, 0x11): val = raw_value
                 attrs[key] = val
                 types[key] = vtype
+                typed_values[key] = value
                 if vtype == 3: typed_strings[key] = string(value)
             def get(ns, name):
                 key = (ns, name)
                 if key in attrs and attrs[key] is None: result['unresolved'].append('/'.join(context) + '@' + name)
                 return attrs.get(key)
+            def security_field(name, boolean=False):
+                key = (ANDROID, name)
+                if any(k[1] == name and k != key for k in attrs):
+                    return {'status': 'unknown', 'reason': 'unexpected namespace'}
+                if key not in attrs: return {'status': 'absent'}
+                if boolean and types[key] == 0x12 and typed_values[key] in (0, 1, 0xffffffff):
+                    return {'status': 'literal', 'value': bool(typed_values[key])}
+                if not boolean and types[key] == 3 and attrs[key] is not None and attrs[key] == typed_strings.get(key) and not attrs[key].startswith(('@', '?')):
+                    return {'status': 'literal', 'value': attrs[key]}
+                return {'status': 'unknown', 'reason': 'unsupported value or resource reference'}
+            if context == ['manifest', 'application']:
+                result['security']['application'] = {name: security_field(name, boolean=name != 'permission') for name in ('debuggable', 'allowBackup', 'usesCleartextTraffic', 'permission')}
+            elif len(context) == 3 and context[1] == 'application' and tag in COMPONENTS:
+                result['security']['components'].append({'type': tag, 'attributes': {
+                    name: security_field(name, boolean=name == 'exported')
+                    for name in ('name', 'exported', 'permission', 'readPermission', 'writePermission')}})
             if context == ['manifest']:
                 result['package'] = get(None, 'package')
                 result['version_code'] = get(ANDROID, 'versionCode')

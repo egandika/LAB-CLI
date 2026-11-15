@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Inventory selected explicit manifest security attributes as partial AXML inferences, not vulnerability verdicts.
+
 - Add read-only APK set archive inventory without device targeting or extraction.
 
 - Add read-only per-entry APK diff with bounded ZIP validation and inferred metadata.

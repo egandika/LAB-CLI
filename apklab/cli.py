@@ -220,6 +220,24 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
             type_records.append({'id': item['file'], 'apk': item, 'types': observation, 'dependencies': prior['dependencies']})
         r['split_type_observations'] = [{'file': record['id'], **record['types']} for record in type_records]
         r['split_types'] = report_split_types(type_records, r)
+    if getattr(args, 'manifest_security', False):
+        from .axml import read_manifest
+        r['manifest_security'] = []
+        for item in r['apks']:
+            if 'entries' not in item:
+                add(r, 'not_tested', item['file'], 'Manifest security inventory requires a valid APK ZIP')
+                continue
+            try:
+                manifest = read_manifest(item['file'])
+                security = manifest['security']
+                r['manifest_security'].append({'file': item['file'], 'source': 'internal_axml', **security})
+                add(r, 'inferences', item['file'], 'Selected explicit manifest security attributes read via partial internal AXML')
+                fields = list(security['application'].values()) + [value for component in security['components'] for value in component['attributes'].values()]
+                if any(field['status'] == 'unknown' for field in fields):
+                    add(r, 'not_tested', item['file'], 'Some manifest security attributes are unresolved')
+            except (ValueError, KeyError, OSError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+                add(r, 'not_tested', item['file'], 'Manifest security attributes unavailable: ' + str(exc))
+        add(r, 'not_tested', 'manifest security', 'Defaults, inherited permissions, API-level behavior, code-level checks and vulnerabilities are not determined')
     if getattr(args, 'zip_alignment', None):
         from .zip_alignment import native_offsets
         r['zip_alignment'] = []
@@ -687,6 +705,7 @@ def parser() -> argparse.ArgumentParser:
     q.add_argument('--split-types', action='store_true', help='Compare literal required and provided split types from supplied APKs')
     q.add_argument('--max-copy-mib', type=int, default=512, help='Maximum physical size per --split-types copy in MiB (default 512)')
     q.add_argument('--max-copy-total-mib', type=int, default=2048, help='Maximum total physical size of --split-types copies in MiB (default 2048)')
+    q.add_argument('--manifest-security', action='store_true', help='Inventory explicit manifest security attributes as inferences')
     q.add_argument('--zip-alignment', type=int, choices=(16,), help='Observe stored native-library ZIP offsets (KiB)')
     q.add_argument('--device-abi', help='Compare a device ABI with observed native library directory names')
     zip_limits(q)
