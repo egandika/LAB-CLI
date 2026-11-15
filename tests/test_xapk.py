@@ -104,6 +104,18 @@ class XapkTests(unittest.TestCase):
         code, r = self.call('xapk', 'inspect', str(self.source), '--check-apks')
         self.assertEqual(code, 1); self.assertTrue(any('ZIP inspection' in x['detail'] for x in r['failures']))
 
+    def test_check_apks_inner_expansion_obeys_limits(self):
+        import io
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as apk:
+            apk.writestr('AndroidManifest.xml', b'x')
+            apk.writestr('large', b'0' * (1024 * 1024 + 1))
+        self.write_archive([('base.apk', buffer.getvalue())])
+        with patch('apklab.core.find_tool', return_value=None):
+            code, result = self.call('xapk', 'inspect', str(self.source), '--check-apks', '--max-entry-mib', '1')
+        self.assertEqual(code, 1, result)
+        self.assertTrue(any('size limit' in entry['detail'] for entry in result['failures']))
+
     def test_check_apks_copy_limit(self):
         self.write_archive([('base.apk', self.apk.read_bytes())])
         with patch('apklab.xapk_checks.MAX_APK', 1):

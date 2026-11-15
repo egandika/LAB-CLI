@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Apply bounded inner ZIP expansion limits when inspecting contained XAPK APKs.
+
 - Include native ABI directory observations and compression method in APK diffs.
 
 - Check supported DEX header SHA-1 and Adler-32 integrity without claiming authenticity.

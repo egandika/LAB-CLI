@@ -62,7 +62,7 @@ def check_members(path: Union[str, PathLike], report: Any, max_entry: int, max_t
                             add(report, 'failures', info.filename, 'Manifest ' + key + ' differs from contained APK')
                         else: add(report, 'verified', info.filename, 'Manifest ' + key + ' matches contained APK')
                 sub = {'verified': [], 'inferences': [], 'failures': [], 'not_tested': []}
-                item['apk'] = inspect_one(target, sub)
+                item['apk'] = inspect_one(target, sub, min(max_entry, MAX_APK), min(max_total, MAX_TOTAL))
                 item['apk']['file'] = info.filename
                 observed = item['apk'].get('package')
                 if not package or not observed:
