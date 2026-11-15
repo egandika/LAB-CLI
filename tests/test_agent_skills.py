@@ -23,6 +23,14 @@ class AgentSkillTests(unittest.TestCase):
                 self.assertTrue(parts[2].strip())
                 self.assertNotIn('allowed-tools:', parts[1])
                 self.assertNotIn('hooks:', parts[1])
+    def test_supporting_guides_are_linked_and_explain_limits(self):
+        readme = (ROOT/'README.md').read_text(encoding='utf-8')
+        for name in ('capability-guide.md', 'troubleshooting.md', 'session-template.md'):
+            self.assertIn('docs/agent/' + name, readme)
+            self.assertTrue((ROOT/'docs/agent'/name).is_file())
+        self.assertIn('Exit codes: 0', (ROOT/'docs/agent/capability-guide.md').read_text(encoding='utf-8'))
+        self.assertIn('not a confidentiality guarantee', (ROOT/'docs/agent/capability-guide.md').read_text(encoding='utf-8'))
+
     def test_extended_workflows_retain_safety_boundaries(self):
         base = ROOT / '.agents/skills'
         for name, phrase in (('apklab-split-check', 'never proves installability'),

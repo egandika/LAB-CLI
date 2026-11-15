@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Document agent capability selection, safe error triage and session handoff.
+
 - Add instruction-only skills for split analysis, copy-based workflows, error diagnosis and repository maintenance.
 
 - Add instruction-only agent skills for APKLab triage, static investigation and evidence reporting.
