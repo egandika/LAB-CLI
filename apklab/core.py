@@ -255,10 +255,14 @@ def zip_infos(z: Any, max_entry: int=MAX_ENTRY, max_total: int=MAX_TOTAL) -> lis
     if max_entry < 1 or max_total < 1:
         raise ValueError('ZIP size limits must be positive')
     infos = z.infolist()
-    if len(infos) > 100000 or sum(i.file_size for i in infos) > max_total:
-        raise ValueError("ZIP exceeds entry count or total uncompressed size limit")
-    if any(i.file_size > max_entry for i in infos):
-        raise ValueError("ZIP entry exceeds uncompressed size limit")
+    if len(infos) > 100000:
+        raise ValueError("ZIP exceeds entry count or total uncompressed size limit: entry count {} exceeds limit 100000".format(len(infos)))
+    total = sum(i.file_size for i in infos)
+    if total > max_total:
+        raise ValueError("ZIP exceeds entry count or total uncompressed size limit: declared total {} bytes exceeds limit {} bytes".format(total, max_total))
+    largest = max((i.file_size for i in infos), default=0)
+    if largest > max_entry:
+        raise ValueError("ZIP entry exceeds uncompressed size limit: largest declared entry {} bytes exceeds limit {} bytes".format(largest, max_entry))
     return infos
 
 
