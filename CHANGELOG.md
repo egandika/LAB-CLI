@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Bound physical input-copy size and count for opt-in split type inspection.
+
 - Avoid split-type comparisons for known conflicting major version codes and report unverified major versions.
 
 - Preserve internal AXML provenance for split package/version mismatches and avoid duplicate mismatch reports.

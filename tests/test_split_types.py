@@ -1,6 +1,9 @@
 import contextlib
 import io
 import json
+import os
+import subprocess
+import sys
 import struct
 import tempfile
 import unittest
@@ -109,6 +112,32 @@ class SplitTypeCliTests(unittest.TestCase):
         with patch('apklab.core.find_tool', side_effect=find), patch('apklab.split_metadata.find_tool', side_effect=find), patch('apklab.core.run', side_effect=run), patch('apklab.split_metadata.run', side_effect=run), contextlib.redirect_stdout(stream):
             code = main(['inspect', *(str(p) for p in files), '--split-types'])
         return code, json.loads(stream.getvalue()), calls
+    def test_copy_limits_and_no_input_overwrite(self):
+        first = self.root / 'large.apk'; first.write_bytes(b'x' * (1024 * 1024 + 1))
+        before = first.read_bytes(); out = io.StringIO()
+        with contextlib.redirect_stdout(out): code = main(['inspect', str(first), '--split-types', '--max-copy-mib', '1'])
+        result = json.loads(out.getvalue())
+        self.assertEqual(code, 1); self.assertTrue(any('copy size limit' in x['detail'] for x in result['failures']))
+        self.assertEqual(first.read_bytes(), before)
+        second = self.root / 'second.apk'; second.write_bytes(b'x' * 600000)
+        first.write_bytes(b'x' * 600000); out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main(['inspect', str(first), str(second), '--split-types', '--max-copy-total-mib', '1'])
+        self.assertEqual(code, 1); self.assertTrue(any('copy size limit' in x['detail'] for x in json.loads(out.getvalue())['failures']))
+        with patch('apklab.cli.MAX_SPLIT_TYPE_INPUTS', 1), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(['inspect', str(first), str(second), '--split-types']), 1)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(['inspect', str(first), '--split-types', '--max-copy-mib', '0']), 1)
+        self.assertTrue(any('positive' in x['detail'] for x in json.loads(out.getvalue())['failures']))
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'POSIX FIFO required')
+    def test_copy_rejects_fifo_without_blocking(self):
+        fifo = self.root / 'pipe.apk'; os.mkfifo(fifo)
+        proc = subprocess.run([sys.executable, '-m', 'apklab', 'inspect', str(fifo), '--split-types'], capture_output=True, text=True, timeout=5)
+        self.assertEqual(proc.returncode, 1)
+        self.assertTrue(any('regular file' in x['detail'] for x in json.loads(proc.stdout)['failures']))
+
     def test_aapt_match_duplicate_offerings_and_copy(self):
         base = self.apk('base.apk', 'base:' + tree('"base__abi"', '""'))
         split = self.apk('split.apk', 'split:' + tree(provided='"base__abi,base__abi"'))

@@ -21,6 +21,9 @@ from .analysis import parse_xmltree, candidates, magic_type
 from .split_metadata import assess_outputs, read_dependencies, read_split_types, assess_split_types
 
 
+MAX_SPLIT_TYPE_INPUTS = 1000
+
+
 VERSION_ARGS = {
     'java': ['-version'], 'keytool': ['-help'], 'jadx': ['--version'],
     'apktool': ['--version'], 'adb': ['version'], 'emulator': ['-version'],
@@ -130,15 +133,36 @@ def inspect(args: argparse.Namespace, _report: Any) -> dict:
     if not getattr(args, 'split_types', False):
         return _inspect_inputs(args, _report)
     # All inspection, including external tools, runs on temporary copies.
-    import shutil
+    import stat
     import tempfile
     with tempfile.TemporaryDirectory(prefix='apklab-split-types-') as tmp:
         originals = apk_paths(args.apks, args.recursive)
+        if len(originals) > MAX_SPLIT_TYPE_INPUTS:
+            raise ValueError('Split type input count exceeds 1000')
+        per_file = args.max_copy_mib * MIB
+        total_limit = args.max_copy_total_mib * MIB
+        if per_file < 1 or total_limit < 1:
+            raise ValueError('Copy size limits must be positive')
+        copied_total = 0
         copies = []
         replacements = {}
         for index, source in enumerate(originals):
             copy = Path(tmp) / ('input-%04d%s' % (index, source.suffix))
-            shutil.copyfile(source, copy)
+            copied = 0
+            fd = os.open(source, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0))
+            with os.fdopen(fd, 'rb') as src, copy.open('xb') as dest:
+                info = os.fstat(src.fileno())
+                if not stat.S_ISREG(info.st_mode): raise ValueError('Split input must be a regular file')
+                if info.st_size > per_file or copied_total + info.st_size > total_limit:
+                    raise ValueError('Split type copy size limit exceeded')
+                while True:
+                    chunk = src.read(min(MIB, per_file - copied + 1, total_limit - copied_total + 1))
+                    if not chunk: break
+                    copied += len(chunk)
+                    copied_total += len(chunk)
+                    if copied > per_file or copied_total > total_limit:
+                        raise ValueError('Split type copy size limit exceeded')
+                    dest.write(chunk)
             copies.append(str(copy))
             replacements[str(copy)] = str(source)
         staged = argparse.Namespace(**vars(args))
@@ -608,6 +632,8 @@ def parser() -> argparse.ArgumentParser:
     q.add_argument('apks', nargs='+')
     q.add_argument('--recursive', action='store_true', help='Include APKs in subdirectories of supplied directories')
     q.add_argument('--split-types', action='store_true', help='Compare literal required and provided split types from supplied APKs')
+    q.add_argument('--max-copy-mib', type=int, default=512, help='Maximum physical size per --split-types copy in MiB (default 512)')
+    q.add_argument('--max-copy-total-mib', type=int, default=2048, help='Maximum total physical size of --split-types copies in MiB (default 2048)')
     q.add_argument('--device-abi', help='Compare a device ABI with observed native library directory names')
     zip_limits(q)
     q = cmd('xapk', 'Safely inspect, unpack, or repack XAPK archives', xapk)
