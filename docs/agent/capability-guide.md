@@ -4,6 +4,8 @@ For authorized applications only. Read `AGENTS.md` and the relevant skill in `.a
 
 ## Choose by objective
 
+For a non-executing structured recommendation, use `apklab agent plan --goal triage --kind xapk`; consult its `--help` for goals and kinds. The plan checks no files or tool availability and intentionally returns `not_tested` with exit 3. Unsupported combinations fail. `--report` creates a file.
+
 | Goal | Relevant command | Important limits |
 | --- | --- | --- |
 | Find installed tools | `apklab doctor` | Presence is not functionality. `--check` runs version/help probes. |

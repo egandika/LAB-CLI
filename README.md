@@ -12,6 +12,7 @@ APKLab helps inspect Android packages, explore DEX and assets, and prepare modif
 
 | Command | Purpose |
 | --- | --- |
+| `agent` | Produce a non-executing structured workflow plan. |
 | `doctor` | Find Android and analysis tools; optionally probe versions or help output. |
 | `setup` | Show a plan or attempt a limited installation through APT. |
 | `inspect` | Check APK ZIPs, native ABIs, metadata, and signatures, including multiple splits. |
@@ -78,6 +79,10 @@ Repo-local instruction-only skills in `.agents/skills/` help with triage, invest
 ### Optional agent plugin package
 
 `agent-plugin/` contains an instruction-only Agent Plugins 1.0-style package of the same skills. It has no hooks, MCP server, executable scripts or pre-approved tools. Client support and installation methods vary; inspect the package and your client's documentation before installing or enabling it, and obtain user approval first. It has not been tested with a real plugin host. The repo skills remain the source of truth; tests check that plugin copies match them. A plugin does not install APKLab or grant terminal access.
+
+### Structured agent plan
+
+`apklab agent plan --goal triage --kind xapk` emits a deterministic JSON recommendation, without reading input files, discovering tools, running commands, or determining authorization. Supported goal/input combinations are listed in `apklab agent plan --help` and the capability guide; unsupported combinations fail. The plan intentionally reports these checks as `not_tested` and exits 3. It is guidance, not a permission gate or an MCP server. `--report` would write a new file and requires permission.
 
 ## Tool discovery and setup
 

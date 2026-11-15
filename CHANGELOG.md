@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add non-executing structured `agent plan` workflow recommendations.
+
 - Add an optional instruction-only portable plugin package mirroring the agent skills; real host compatibility is untested.
 
 - Document agent capability selection, safe error triage and session handoff.
