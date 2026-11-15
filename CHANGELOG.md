@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add source-informed white-box testing guidance with mock and integration boundaries.
+
 - Add scoped reverse-engineering guidance that reuses existing analysis and rebuild skills.
 
 - Add an instruction-only orchestrator for selective, goal-directed skill routing.
