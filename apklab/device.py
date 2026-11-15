@@ -28,16 +28,18 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
     adb = tools['adb']
     def adb_command(*args):
         return run([adb, '-s', serial] + list(args), timeout=120)
+    def complete(result):
+        return result['returncode'] == 0 and not result.get('stdout_truncated') and not result.get('capture_incomplete')
     state = adb_command('get-state')
-    if state['returncode'] != 0 or state['stdout'].strip() != 'device':
+    if not complete(state) or state['stdout'].strip() != 'device':
         raise ValueError('Requested emulator is not online')
     identity = adb_command('emu', 'avd', 'name')
     qemu = adb_command('shell', 'getprop', 'ro.kernel.qemu')
-    if identity['returncode'] != 0 or 'OK' not in identity['stdout'] or qemu['returncode'] != 0 or qemu['stdout'].strip() != '1':
+    if not complete(identity) or 'OK' not in identity['stdout'] or not complete(qemu) or qemu['stdout'].strip() != '1':
         raise ValueError('Could not confirm Android emulator identity; refusing device operation')
     users = adb_command('shell', 'pm', 'list', 'users')
     found_users = re.findall(r'UserInfo\{(\d+):', users['stdout'])
-    if users['returncode'] != 0 or found_users != ['0']:
+    if not complete(users) or found_users != ['0']:
         raise ValueError('Expected a disposable single-user emulator; refusing installation')
     with tempfile.TemporaryDirectory(prefix='apklab-device-') as tmp:
         copies = []
@@ -74,7 +76,7 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
             raise ValueError('Unsupported package name')
         existing = adb_command('shell', 'pm', 'list', 'packages', '-u', package)
         lines = [line.strip() for line in existing['stdout'].splitlines() if line.strip()]
-        if existing['returncode'] != 0 or any(not line.startswith('package:') for line in lines):
+        if not complete(existing) or any(not line.startswith('package:') for line in lines):
             raise ValueError('Could not safely determine installed packages')
         if 'package:' + package in lines:
             raise ValueError('Package already exists on emulator; refusing to replace it')
@@ -82,7 +84,7 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
         add(r, 'not_tested', 'split completeness', 'Split requirements, OBBs, and device compatibility are not fully validated')
         result = adb_command('install-multiple' if len(copies) > 1 else 'install', *copies)
         r['install'] = result
-        if result['returncode'] != 0 or not re.search(r'(?m)^Success\s*$', result['stdout']):
+        if not complete(result) or not re.search(r'(?m)^Success\s*$', result['stdout']):
             add(r, 'failures', 'installation', 'ADB installation failed; see install result')
             return r
         add(r, 'verified', 'installation', 'ADB reported installation success on the selected emulator')
@@ -90,7 +92,7 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
         if launch:
             result = adb_command('shell', 'monkey', '-p', package, '-c', 'android.intent.category.LAUNCHER', '1')
             r['launch'] = result
-            if result['returncode'] != 0 or not re.search(r'Events injected:\s*1\b', result['stdout']):
+            if not complete(result) or not re.search(r'Events injected:\s*1\b', result['stdout']):
                 add(r, 'failures', 'launch', 'ADB did not confirm a launcher event; see launch result')
             else:
                 add(r, 'verified', 'launch', 'ADB reported one launcher event; app functionality was not assessed')

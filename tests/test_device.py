@@ -55,6 +55,31 @@ class DeviceTests(unittest.TestCase):
             with patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=self.fake_run):
                 code, r = self.call('device','--serial','emulator-5554','--confirm-install',str(self.apk))
             self.assertEqual(code, 1, r); self.assertFalse(any('install' in c for c in self.calls))
+    def test_refuses_incomplete_safety_outputs(self):
+        for command in ('get-state', 'emu', 'getprop', 'users', 'packages'):
+            for flag in ('stdout_truncated', 'capture_incomplete'):
+                self.calls.clear()
+                def run(args, timeout=120):
+                    result = self.fake_run(args, timeout)
+                    if command in args: result[flag] = True
+                    return result
+                with self.subTest(command=command, flag=flag), patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=run):
+                    code, result = self.call('device', '--serial', 'emulator-5554', '--confirm-install', str(self.apk))
+                self.assertEqual(code, 1, result)
+                self.assertFalse(any('install' in call or 'install-multiple' in call for call in self.calls))
+
+    def test_truncated_install_or_launch_is_not_verified(self):
+        for command in ('install', 'monkey'):
+            self.calls.clear()
+            def run(args, timeout=120):
+                result = self.fake_run(args, timeout)
+                if command in args: result['stdout_truncated'] = True
+                return result
+            with self.subTest(command=command), patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=run):
+                code, result = self.call('device', '--serial', 'emulator-5554', '--confirm-install', '--launch', str(self.apk))
+            self.assertEqual(code, 1, result)
+            self.assertFalse(any(x['subject'] == ('installation' if command == 'install' else 'launch') for x in result['verified']))
+
     def test_refuses_unverified_signer(self):
         def inspect(path, r):
             item = self.inspect(path, r); item['signer_sha256'] = None; return item

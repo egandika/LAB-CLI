@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Fail closed on truncated or incomplete ADB safety-check output and do not verify incomplete install/launch output.
+
 - Add opt-in copy-based inspection of modern literal split types, with conservative unknowns and internal AXML inferences; no split selection or completeness claim.
 
 - Expand the CI Python matrix to 3.9–3.13 and annotate public module functions.
