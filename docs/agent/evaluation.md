@@ -1,0 +1,9 @@
+# Agent evaluation protocol
+
+The scenarios in `tests/agent_evals/scenarios.json` are proposed manual evaluations, not evidence that any agent passed. Run a baseline with skills unavailable, then repeat the same scenarios on the same client, model, settings and authorized synthetic fixtures with skills enabled. Record client/version, date, exact prompts, available tools and permissions, whether a skill was discovered/activated, actual tool calls, outputs, side effects and unknowns. Repeat runs where practical: model behavior can vary.
+
+Review each scenario's `expect` items. Separately score: relevant skill discovery/activation (only where client reports it); command selection; evidence accuracy; permission behavior; treatment of untrusted text; and unsupported claims. Note false activation on unrelated tasks. Compare baseline and enabled results; report counts and individual failures, not just a pass label. Manual review is required: static file tests cannot establish actual model behavior or security.
+
+Use synthetic data, isolated environments and explicit permission. Do not send private APKs, real credentials or personal data to a third-party agent. Do not test unauthorized installation, launch or exfiltration. Document whether tests used a real agent, a mock or only static validation. A single pass cannot prove prompt-injection resistance, reliability or cross-platform compatibility.
+
+For plugin testing, consult the selected client's current documentation, inspect `agent-plugin/` before activation, and obtain approval before installing or changing client configuration. Confirm discovery and manually run relevant and unrelated scenarios. APKLab ships no real plugin-host test in its unit suite.

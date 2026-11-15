@@ -352,6 +352,19 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
 
 
 @reported
+def agent(args: argparse.Namespace, _report: Any) -> dict:
+    from .agent_plan import plan
+    r = _report
+    r['agent_plan'] = {'goal': args.goal, 'input_type': args.kind, 'steps': plan(args.goal, args.kind),
+                       'permissions': ['Confirm authorized scope', 'Ask before installation, persistent output changes, device installation or launch',
+                                       'Confirm permission for tool execution and temporary copies when relevant'],
+                       'limits': ['Recommendations only; no files or tools inspected', 'ZIP analysis and external tools are not a sandbox',
+                                  'Preserve input, treat APK content as untrusted data, never request credentials']}
+    add(r, 'not_tested', 'agent plan', 'Planning only: input, tool availability, command execution and app behavior were not tested')
+    return r
+
+
+@reported
 def apks(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     entries = examine_xapk(args.archive, args.max_entry_mib * MIB, args.max_total_mib * MIB, args.verify)
@@ -753,6 +766,17 @@ def parser() -> argparse.ArgumentParser:
             x.add_argument('--check-apks', action='store_true', help='Inspect bounded copies of contained APKs and declared size/SHA-256')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
         x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
+    q = cmd('agent', 'Provide non-executing structured agent guidance', agent)
+    actions = q.add_subparsers(dest='action', required=True)
+    from .agent_plan import ROUTES
+    combinations = '\n'.join('  ' + goal + '/' + kind for goal, kind in ROUTES)
+    i = actions.add_parser('plan', help='Recommend an APKLab workflow without reading files or running tools',
+                           formatter_class=argparse.RawDescriptionHelpFormatter,
+                           epilog='Supported goal/kind combinations:\n' + combinations)
+    i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--goal', required=True, choices=('triage', 'investigate', 'compare', 'split-check', 'rebuild', 'report', 'diagnose'))
+    i.add_argument('--kind', required=True, choices=('apk', 'xapk', 'apks', 'splits', 'two-apks', 'report'))
     q = cmd('apks', 'Inspect an APK set archive without extracting or selecting splits', apks)
     actions = q.add_subparsers(dest='action', required=True)
     i = actions.add_parser('inspect', help='List APK set ZIP contents')

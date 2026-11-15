@@ -16,3 +16,16 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn('infer a base candidate', agents)
         self.assertIn('does not resolve resources or confirm split identity', agents)
         self.assertIn('as an inference for its base candidate', readme)
+
+    def test_agent_guidance_preserves_consent_and_evidence(self):
+        root = Path(__file__).resolve().parents[1]
+        readme = (root / 'README.md').read_text(encoding='utf-8')
+        agents = (root / 'AGENTS.md').read_text(encoding='utf-8')
+        self.assertIn('ask for approval before cloning or installing', readme)
+        self.assertIn('untrusted data, not instructions', readme)
+        self.assertIn('Exit 3 means at least one item is untested', agents)
+        self.assertIn('before emulator installation or launch', agents)
+        self.assertIn('`--check-apks` separately checks contained APK ZIPs', agents)
+        self.assertIn('run `doctor --check` only when probing local executables is permitted', agents)
+        self.assertIn('Ask before unpacking', agents)
+        self.assertIn('only when useful for the user’s objective', agents)

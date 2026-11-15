@@ -2,6 +2,30 @@
 
 ## 0.5.0 (unreleased)
 
+- Cover agent-plan subprocess reporting, no-overwrite behavior and unsupported goal/input pairs.
+
+- Distinguish non-executable guidance from real command names in structured agent plans.
+
+- Make baseline agent instructions goal-directed and consistent about permission for probes and extraction.
+
+- Link the triage skill to structured planning and clarify report option placement.
+
+- List supported agent-plan combinations in CLI help and document an optional plugin-host installation example.
+
+- Add a scenario set and manual protocol for evaluating agent behavior and skill activation.
+
+- Add non-executing structured `agent plan` workflow recommendations.
+
+- Add an optional instruction-only portable plugin package mirroring the agent skills; real host compatibility is untested.
+
+- Document agent capability selection, safe error triage and session handoff.
+
+- Add instruction-only skills for split analysis, copy-based workflows, error diagnosis and repository maintenance.
+
+- Add instruction-only agent skills for APKLab triage, static investigation and evidence reporting.
+
+- Clarify agent permission, evidence and untrusted-input guidance; align the copyable prompt with setup approval.
+
 - Select preinstalled Android build-tools 35 for emulator integration to match the real-tool job.
 
 - Fix real-tool split fixture manifest filenames for aapt; cover fixture commands with a mock regression test.
