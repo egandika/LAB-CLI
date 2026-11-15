@@ -38,17 +38,38 @@ class ProbeAndVerifyTests(unittest.TestCase):
         self.assertTrue(any(x['subject'] == 'aapt' for x in r['not_tested']))
         self.assertTrue(any(x['subject'] == 'tool functionality' for x in r['not_tested']))
 
-    def test_setup_reports_partial_update_failure(self):
+    def test_setup_stops_on_failed_or_timed_out_update(self):
+        for returncode in (100, None):
+            with self.subTest(returncode=returncode):
+                def fake_run(args, timeout=120):
+                    self.assertEqual(args[-1], 'update')
+                    self.assertIn('APT::Update::Error-Mode=any', args)
+                    return {'returncode': returncode, 'stdout': '', 'stderr': 'repository unreachable'}
+                def find(name): return '/fake/java' if name == 'java' else None
+                with patch('apklab.cli.find_executable', return_value='/fake/apt'), patch('apklab.cli.find_tool', side_effect=find), patch('apklab.cli.os.geteuid', return_value=0, create=True), patch('apklab.cli.run', side_effect=fake_run) as run:
+                    code, r = self.call('setup', '--install')
+                self.assertEqual(code, 1)
+                run.assert_called_once()
+                self.assertTrue(any(x['subject'] == 'apt update' for x in r['failures']))
+                self.assertTrue(any(x['subject'] == 'java' for x in r['verified']))
+                self.assertEqual({x['subject'] for x in r['not_tested']} - {'manual tools'}, {'apktool', 'adb', 'aapt', 'zipalign', 'apksigner'})
+                self.assertFalse(any(x['subject'] == 'apktool' for x in r['failures']))
+
+    def test_setup_installs_only_after_successful_update(self):
+        calls = []
         def fake_run(args, timeout=120):
-            if args[-1] == 'update':
-                self.assertIn('APT::Update::Error-Mode=any', args)
-                return {'returncode': 100, 'stdout': '', 'stderr': 'repository unreachable'}
-            return {'returncode': 100, 'stdout': '', 'stderr': 'package unavailable'}
-        with patch('apklab.cli.find_executable', return_value='/fake/apt'), patch('apklab.cli.find_tool', return_value=None), patch('apklab.cli.os.geteuid', return_value=0, create=True), patch('apklab.cli.run', side_effect=fake_run):
+            calls.append(args)
+            return {'returncode': 0, 'stdout': '', 'stderr': ''}
+        def find(name):
+            if name != 'apktool' or len(calls) > 1: return '/fake/' + name
+            return None
+        with patch('apklab.cli.find_executable', return_value='/fake/apt'), patch('apklab.cli.find_tool', side_effect=find), patch('apklab.cli.os.geteuid', return_value=0, create=True), patch('apklab.cli.run', side_effect=fake_run):
             code, r = self.call('setup', '--install')
-        self.assertEqual(code, 1)
-        self.assertTrue(any(x['subject'] == 'apt update' for x in r['failures']))
-        self.assertTrue(any(x['subject'] == 'java' for x in r['failures']))
+        self.assertEqual(code, 3)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][-1], 'update')
+        self.assertEqual(calls[1][-2:], ['install', 'apktool'])
+        self.assertTrue(any(x['subject'] == 'apktool' and 'APT installed' in x['detail'] for x in r['verified']))
 
     def test_verify_success_failure_and_unavailable(self):
         def found(name): return '/fake/' + name if name in ('zipalign', 'apksigner') else None

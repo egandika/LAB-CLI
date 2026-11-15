@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Stop APT package installation after a failed or timed-out package index update.
+
 - Add non-installing goal-specific tool discovery to setup plans; prevent combining goals with the broad APT installer.
 
 - Cover agent-plan subprocess reporting, no-overwrite behavior and unsupported goal/input pairs.

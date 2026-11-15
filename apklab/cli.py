@@ -106,14 +106,17 @@ def setup(args: argparse.Namespace) -> dict:
     if missing:
         res = run(prefix + [apt, '-o', 'APT::Update::Error-Mode=any', '-o', 'Acquire::Retries=0', '-o', 'Acquire::http::Timeout=10', '-o', 'Acquire::https::Timeout=10', 'update'], timeout=180)
         if res['returncode'] != 0:
-            add(r, 'failures', 'apt update', (res['stderr'] or res['stdout'])[-3000:])
-        for tool, pkg in missing.items():
-            res = run(prefix + [apt, '-y', '-o', 'Acquire::Retries=0', '-o', 'Acquire::http::Timeout=10', '-o', 'Acquire::https::Timeout=10', 'install', pkg], timeout=180)
-            found = find_tool(tool)
-            if res['returncode'] == 0 and found:
-                add(r, 'verified', tool, 'APT installed; executable found: ' + found)
-            else:
-                add(r, 'failures', tool, 'Install/verification failed: ' + (res['stderr'] or res['stdout'])[-1500:])
+            add(r, 'failures', 'apt update', (res['stderr'] or res['stdout'] or 'APT update did not succeed')[-3000:])
+            for tool in missing:
+                add(r, 'not_tested', tool, 'Installation not attempted because APT update failed')
+        else:
+            for tool, pkg in missing.items():
+                res = run(prefix + [apt, '-y', '-o', 'Acquire::Retries=0', '-o', 'Acquire::http::Timeout=10', '-o', 'Acquire::https::Timeout=10', 'install', pkg], timeout=180)
+                found = find_tool(tool)
+                if res['returncode'] == 0 and found:
+                    add(r, 'verified', tool, 'APT installed; executable found: ' + found)
+                else:
+                    add(r, 'failures', tool, 'Install/verification failed: ' + (res['stderr'] or res['stdout'])[-1500:])
     for tool in packages:
         if tool not in missing: add(r, 'verified', tool, 'Already present: ' + find_tool(tool))
     add(r, 'not_tested', 'manual tools', 'JADX, SDK, emulator and Ghidra are not installed by this command; see README')
