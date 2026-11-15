@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add read-only APK set archive inventory without device targeting or extraction.
+
 - Add read-only per-entry APK diff with bounded ZIP validation and inferred metadata.
 
 - Add offline per-library 16 KiB ZIP data-offset observations for existing APKs.

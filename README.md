@@ -16,6 +16,7 @@ APKLab helps inspect Android packages, explore DEX and assets, and prepare modif
 | `setup` | Show a plan or attempt a limited installation through APT. |
 | `inspect` | Check APK ZIPs, native ABIs, metadata, and signatures, including multiple splits. |
 | `xapk` | Inspect, extract, or repack an XAPK without overwriting the original. |
+| `apks` | List APK set archive contents without selecting splits. |
 | `dex` | Index DEX identifiers, manifest permissions/components, and heuristic obfuscation hints. |
 | `jadx` | Decompile a temporary APK copy to a new output directory with monitored limits. |
 | `inventory` | List assets and native libraries; search bounded text and inspect native symbols. |
@@ -155,7 +156,7 @@ apklab xapk repack game.xapk ./new-output --directory --replace base.apk=/path/t
 
 Repeat `--replace ENTRY=APK` for other APKs. Source paths are read-only, replacements use the same APK ZIP checks as `inspect`, including exactly one root `AndroidManifest.xml` and CRC checks. OBB and other entries are copied unchanged. By default the manifest is **not rewritten**; version, size or checksum fields may be stale. With `--update-manifest`, a supported `split_apks` list must uniquely declare each replacement; the command writes each replacement’s `size` and `sha256` fields, refusing ambiguous declarations and recognized unsupported checksum fields. Other manifest fields and checksum schemas are not validated or updated. In `--directory` mode the new directory contains `repacked.xapk` and copies of declared OBBs under `Android/obb/PACKAGE/`. It requires a supported `package_name` and `expansions` list, validates OBB filename, location, and a one-to-one match with archive entries, and rejects unsupported, missing or undeclared OBBs. This validates placement only, not OBB contents or compatibility. Signature compatibility, installer support, device-specific split selection, and app behavior are not verified.
 
-Default APK limits are 100,000 entries, 64 MiB per entry, and 512 MiB total uncompressed. For XAPK, the default size limits are 2,048 MiB per entry and 8,192 MiB total. Adjust them deliberately with `--max-entry-mib` and `--max-total-mib`; higher limits may use substantial memory, CPU, and disk space. CRC is not a substitute for signature verification. `.apks` containers are not extracted automatically.
+Default APK limits are 100,000 entries, 64 MiB per entry, and 512 MiB total uncompressed. For XAPK, the default size limits are 2,048 MiB per entry and 8,192 MiB total. Adjust them deliberately with `--max-entry-mib` and `--max-total-mib`; higher limits may use substantial memory, CPU, and disk space. CRC is not a substitute for signature verification. `.apks` containers are not extracted automatically. Use `apklab apks inspect release.apks --verify` to list safe ZIP entries and check their CRCs; inner APK validity and `toc.pb` targeting are not parsed, and no device-specific splits are selected.
 
 ### Copy-based modification workflow
 

@@ -320,6 +320,22 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
 
 
 @reported
+def apks(args: argparse.Namespace, _report: Any) -> dict:
+    r = _report
+    entries = examine_xapk(args.archive, args.max_entry_mib * MIB, args.max_total_mib * MIB, args.verify)
+    r['entries'] = entries
+    add(r, 'verified', 'APKS archive', 'Listed validated ZIP directory entries and checked safe paths and limits')
+    if args.verify: add(r, 'verified', 'APKS archive', 'Read all file entries and checked CRC; SHA-256 recorded per entry')
+    else: add(r, 'not_tested', 'APKS CRC', 'Use --verify to read entry contents and check CRC')
+    if not any(entry['kind'] == 'apk' for entry in entries):
+        add(r, 'failures', 'APKS archive', 'No APK entries found')
+    r['toc_present'] = any(entry['path'] == 'toc.pb' and entry['kind'] == 'other' for entry in entries)
+    add(r, 'not_tested', 'APKS targeting', 'toc.pb and device targeting are not parsed; no splits were selected')
+    add(r, 'not_tested', 'contained APKs', 'Inner APK validity, signatures, set completeness and installation were not checked')
+    return r
+
+
+@reported
 def diff(args: argparse.Namespace, _report: Any) -> dict:
     from .diff import snapshot, compare
     r = _report
@@ -692,6 +708,13 @@ def parser() -> argparse.ArgumentParser:
             x.add_argument('--check-apks', action='store_true', help='Inspect bounded copies of contained APKs and declared size/SHA-256')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
         x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
+    q = cmd('apks', 'Inspect an APK set archive without extracting or selecting splits', apks)
+    actions = q.add_subparsers(dest='action', required=True)
+    i = actions.add_parser('inspect', help='List APK set ZIP contents')
+    i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('archive'); i.add_argument('--verify', action='store_true', help='Read all entries and check CRC')
+    i.add_argument('--max-entry-mib', type=int, default=2048); i.add_argument('--max-total-mib', type=int, default=8192)
     q = cmd('diff', 'Compare two APK ZIPs without modifying them', diff)
     q.add_argument('old'); q.add_argument('new')
     zip_limits(q)
