@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from apklab.cli import main
 from apklab.core import add, inspect_one, report
-from apklab.split_metadata import assess_outputs, parse_dependencies, read_dependencies
+from apklab.split_metadata import assess_outputs, parse_dependencies, read_dependencies, parse_split_types
 
 
 class SplitDependencyParsingTests(unittest.TestCase):
@@ -143,6 +143,22 @@ class SplitVerificationTests(unittest.TestCase):
             with self.subTest(kw=kw):
                 code, result = self.verify(**kw); self.assertEqual(code, 1)
                 self.assertTrue(any(expected in e['detail'] for e in result['failures']))
+    def test_modern_split_types_in_verify(self):
+        for mode in ('matching', 'missing', 'partial'):
+            def types(path):
+                index = int(Path(path).parent.name[-1])
+                text = 'E: manifest\n'
+                if not index: text += '  A: android:requiredSplitTypes="base__abi"\n'
+                elif mode == 'matching': text += '  A: android:splitTypes="base__abi"\n'
+                return parse_split_types(text, truncated=mode == 'partial' and index == 1)
+            with self.subTest(mode=mode), patch('apklab.cli.read_split_types', side_effect=types):
+                code, result = self.verify()
+            self.assertEqual(code, 1 if mode == 'missing' else 3, result)
+            self.assertIn('split_types', result)
+            self.assertTrue(all('types' in m['inspection'] for m in result['members']))
+            if mode == 'missing': self.assertEqual(result['split_types']['missing'], ['base__abi'])
+            if mode == 'partial': self.assertIsNone(result['split_types']['missing'])
+
     def test_partial_dependencies_are_not_claimed_complete(self):
         code, result = self.verify(partial=True)
         self.assertEqual(code, 3, result); self.assertIn('dependency declarations', result['split_analysis']['unknown'])

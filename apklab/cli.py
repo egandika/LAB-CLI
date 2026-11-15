@@ -18,7 +18,7 @@ from .splits import init_set, read_set
 from .setup_plan import plan as setup_guidance, NEXT
 from .jadx import decompile
 from .analysis import parse_xmltree, candidates, magic_type
-from .split_metadata import assess_outputs, read_dependencies, read_split_types, assess_split_types
+from .split_metadata import assess_outputs, read_dependencies, read_split_types, report_split_types, unavailable_split_types
 
 
 MAX_SPLIT_TYPE_INPUTS = 1000
@@ -215,35 +215,11 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
     if getattr(args, 'split_types', False):
         type_records = []
         for item, prior in zip(r['apks'], observations):
-            if 'entries' not in item:
-                observation = {'source': 'unavailable', 'reason': 'APK ZIP validation did not succeed',
-                               'attributes': {name: {'status': 'unknown', 'reason': 'input unavailable'} for name in ('requiredSplitTypes', 'splitTypes')}}
-            else:
-                observation = read_split_types(item['file'])
+            observation = (read_split_types(item['file']) if 'entries' in item
+                           else unavailable_split_types('APK ZIP validation did not succeed'))
             type_records.append({'id': item['file'], 'apk': item, 'types': observation, 'dependencies': prior['dependencies']})
-            for name, attribute in observation['attributes'].items():
-                if attribute['status'] == 'literal':
-                    category = 'inferences' if observation['source'] == 'internal_axml' else 'verified'
-                    add(r, category, item['file'], name + ' literal from ' + observation['source'] + ': ' + repr(attribute['value']))
-                elif attribute['status'] == 'unknown':
-                    add(r, 'not_tested', item['file'], name + ': ' + attribute.get('reason', 'unknown'))
-            if observation['source'] == 'internal_axml':
-                add(r, 'not_tested', item['file'], 'aapt split type reading unavailable; internal AXML observations are inferences')
         r['split_type_observations'] = [{'file': record['id'], **record['types']} for record in type_records]
-        analysis = assess_split_types(type_records)
-        r['split_types'] = analysis
-        for reason in analysis['unknown'] + analysis['identity_not_tested']:
-            add(r, 'not_tested', 'split types', reason)
-        if not analysis['unknown']:
-            if analysis['source'] == 'internal_axml':
-                add(r, 'inferences', 'split types', 'Compared literal types from supplied inputs including internal AXML; missing: ' + ', '.join(analysis['missing']))
-                if analysis['missing']:
-                    add(r, 'not_tested', 'split types', 'Missing types inferred using internal AXML are not independently verified')
-            elif analysis['missing']:
-                add(r, 'failures', 'split types', 'Required types not offered by supplied APKs: ' + ', '.join(analysis['missing']))
-            else:
-                add(r, 'verified', 'split types', 'No declared required types are missing from the supplied inputs')
-        add(r, 'not_tested', 'split types', 'Additional splits may be required; completeness, device selection and installation were not tested')
+        r['split_types'] = report_split_types(type_records, r)
     if args.device_abi:
         present = sorted({abi for apk in r['apks'] for abi in apk['architectures']})
         r['abi_observation'] = {'requested': args.device_abi, 'native_directories': present}
@@ -586,17 +562,21 @@ def splits(args: argparse.Namespace, _report: Any) -> dict:
                 if observed['apk'].get('signer_sha256'):
                     add(r, 'verified', item['id'], 'Signer certificate digest set read from verified signed output')
                 observed['dependencies'] = read_dependencies(signed)
+                observed['types'] = read_split_types(signed)
                 if observed['dependencies']['status'] != 'observed':
                     add(r, 'not_tested', item['id'], 'Split dependency metadata is unavailable or partial')
             except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
                 observed['error'] = str(exc)
                 add(r, 'not_tested', item['id'], 'Could not inspect signed output: ' + str(exc))
+            if 'types' not in observed:
+                observed['types'] = unavailable_split_types('signed output unavailable')
             result['inspection'] = observed
             observations.append(observed)
         r['members'].append(result)
     if args.stage == 'verify':
         analysis = assess_outputs(observations)
         r['split_analysis'] = analysis
+        r['split_types'] = report_split_types(observations, r)
         for issue in analysis['issues']: add(r, 'failures', 'split set', issue)
         for inference in analysis['inferences']: add(r, 'inferences', 'split set', inference)
         for unknown in analysis['unknown']: add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every output')

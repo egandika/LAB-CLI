@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from .core import add, find_tool, inspect_one, reported, run
-from .split_metadata import assess_outputs, read_dependencies
+from .split_metadata import assess_outputs, read_dependencies, read_split_types, report_split_types
 
 
 @reported
@@ -61,7 +61,7 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
             raise ValueError('Exactly one base candidate without a split name is required')
         splits = [a['split'] for a in items if a.get('split')]
         if len(splits) != len(set(splits)): raise ValueError('Duplicate split names')
-        observations = [{'id': str(i), 'source': str(inputs[i]), 'apk': item, 'dependencies': read_dependencies(copy)}
+        observations = [{'id': str(i), 'source': str(inputs[i]), 'apk': item, 'dependencies': read_dependencies(copy), 'types': read_split_types(copy)}
                         for i, (copy, item) in enumerate(zip(copies, items))]
         r['split_observations'] = observations
         r['split_analysis'] = analysis = assess_outputs(observations)
@@ -73,6 +73,10 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
             add(r, 'inferences', 'split set', inference)
         for unknown in analysis['unknown']:
             add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
+        r['split_types'] = report_split_types(observations, r)
+        if any(entry['subject'] == 'split types' for entry in r['failures']):
+            add(r, 'not_tested', 'installation', 'Installation was blocked by split type checks')
+            return r
         package = next(iter(packages))
         if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+', package):
             raise ValueError('Unsupported package name')

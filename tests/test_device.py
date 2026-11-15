@@ -80,6 +80,27 @@ class DeviceTests(unittest.TestCase):
             self.assertEqual(code, 1, result)
             self.assertFalse(any(x['subject'] == ('installation' if command == 'install' else 'launch') for x in result['verified']))
 
+    def test_modern_split_type_block_and_unknowns(self):
+        from apklab.split_metadata import parse_split_types
+        for mode in ('missing', 'matching', 'truncated', 'fallback', 'partial-major'):
+            self.calls.clear()
+            text = 'E: manifest\n  A: android:requiredSplitTypes="base__abi"\n'
+            if mode == 'matching': text += '  A: android:splitTypes="base__abi"\n'
+            observation = parse_split_types(text, truncated=mode == 'truncated')
+            if mode == 'fallback':
+                observation['source'] = 'internal_axml'
+                observation['split_identity'] = {'status': 'absent'}
+            dep = {'status': 'partial' if mode == 'partial-major' else 'observed'}
+            with self.subTest(mode=mode), patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=self.fake_run), patch('apklab.device.read_dependencies', return_value=dep), patch('apklab.device.read_split_types', return_value=observation):
+                code, result = self.call('device', '--serial', 'emulator-5554', '--confirm-install', str(self.apk))
+            installed = any('install' in call for call in self.calls)
+            self.assertEqual(installed, mode != 'missing', result)
+            self.assertEqual(code, 1 if mode == 'missing' else 3, result)
+            if mode == 'missing': self.assertTrue(any(x['subject'] == 'split types' for x in result['failures']))
+            if mode in ('truncated', 'fallback', 'partial-major'):
+                self.assertTrue(any(x['subject'] == 'split types' for x in result['not_tested']))
+                self.assertFalse(any(x['subject'] == 'split types' for x in result['verified'] + result['failures']))
+
     def test_refuses_unverified_signer(self):
         def inspect(path, r):
             item = self.inspect(path, r); item['signer_sha256'] = None; return item

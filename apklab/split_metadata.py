@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Optional, Union
 from os import PathLike
 import re
-from .core import find_tool, run
+from .core import add, find_tool, run
 
 MAX_DEPENDENCIES = 512
 MAX_XML_LINES = 10000
@@ -269,7 +269,7 @@ def assess_split_types(records: Any) -> dict:
     unknown = []
     identities = []
     for record in records:
-        apk = record['apk']
+        apk = record.get('apk') or {}
         observation = record['types']
         if observation['source'] == 'internal_axml':
             identity = observation.get('split_identity', {'status': 'unknown'})
@@ -279,8 +279,8 @@ def assess_split_types(records: Any) -> dict:
     bases = [i for i, name in enumerate(identities) if name is None]
     if False in identities or len(bases) != 1:
         unknown.append('base identity is ambiguous or unavailable')
-    packages = [r['apk'].get('package') for r in records]
-    versions = [r['apk'].get('version_code') for r in records]
+    packages = [(r.get('apk') or {}).get('package') for r in records]
+    versions = [(r.get('apk') or {}).get('version_code') for r in records]
     if not all(packages) or not all(versions) or len(set(packages)) != 1 or len(set(versions)) != 1:
         unknown.append('package or version identity is unavailable or inconsistent')
     # versionCodeMajor defaults to zero only when a complete manifest was observed.
@@ -305,4 +305,37 @@ def assess_split_types(records: Any) -> dict:
     result['provided'] = sorted({value for record in records for value in record['types']['attributes']['splitTypes'].get('types', [])})
     result['missing'] = sorted(set(result['required']) - set(result['provided']))
     result['source'] = 'internal_axml' if any(record['types']['source'] == 'internal_axml' for record in records) else 'aapt'
+    return result
+
+
+def unavailable_split_types(reason: str) -> dict:
+    return {'source': 'unavailable', 'reason': reason,
+            'attributes': {name: {'status': 'unknown', 'reason': reason} for name in _TYPE_IDS}}
+
+
+def report_split_types(records: Any, report: Any) -> dict:
+    """Add provenance-aware observations and compare only supplied APKs."""
+    for record in records:
+        observation = record['types']
+        for name, attribute in observation['attributes'].items():
+            if attribute['status'] == 'literal':
+                category = 'inferences' if observation['source'] == 'internal_axml' else 'verified'
+                add(report, category, record['id'], name + ' literal from ' + observation['source'] + ': ' + repr(attribute['value']))
+            elif attribute['status'] == 'unknown':
+                add(report, 'not_tested', record['id'], name + ': ' + attribute.get('reason', 'unknown'))
+        if observation['source'] == 'internal_axml':
+            add(report, 'not_tested', record['id'], 'aapt split type reading unavailable; internal AXML observations are inferences')
+    result = assess_split_types(records)
+    for reason in result['unknown'] + result['identity_not_tested']:
+        add(report, 'not_tested', 'split types', reason)
+    if not result['unknown']:
+        if result['source'] == 'internal_axml' or result['identity_not_tested']:
+            add(report, 'inferences', 'split types', 'Compared supplied inputs with inferred or incomplete identity metadata; missing: ' + ', '.join(result['missing']))
+            if result['missing']:
+                add(report, 'not_tested', 'split types', 'Missing types inferred with incomplete or internal metadata are not independently verified')
+        elif result['missing']:
+            add(report, 'failures', 'split types', 'Required types not offered by supplied APKs: ' + ', '.join(result['missing']))
+        else:
+            add(report, 'verified', 'split types', 'No declared required types are missing from the supplied inputs')
+    add(report, 'not_tested', 'split types', 'Additional splits may be required; completeness, device selection and installation were not tested')
     return result
