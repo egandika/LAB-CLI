@@ -320,6 +320,23 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
 
 
 @reported
+def diff(args: argparse.Namespace, _report: Any) -> dict:
+    from .diff import snapshot, compare
+    r = _report
+    old = snapshot(args.old, args.max_entry_mib * MIB, args.max_total_mib * MIB)
+    new = snapshot(args.new, args.max_entry_mib * MIB, args.max_total_mib * MIB)
+    r['diff'] = compare(old, new)
+    r['metadata'] = {'old': old['metadata'], 'new': new['metadata']}
+    add(r, 'verified', 'APK diff', 'Compared per-entry SHA-256, compressed and uncompressed sizes of two CRC-checked ZIPs')
+    for field in ('package', 'version_code', 'version_name'):
+        a, b = old['metadata'].get(field), new['metadata'].get(field)
+        if a is None or b is None: add(r, 'not_tested', 'APK diff metadata', field + ' was unavailable in at least one APK')
+        else: add(r, 'inferences', 'APK diff metadata', field + (' matches' if a == b else ' differs') + ' based on internal AXML')
+    add(r, 'not_tested', 'APK diff', 'Behavior, signatures, split-set equivalence and semantic resource changes are not established')
+    return r
+
+
+@reported
 def inventory(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['files'] = []
@@ -675,6 +692,9 @@ def parser() -> argparse.ArgumentParser:
             x.add_argument('--check-apks', action='store_true', help='Inspect bounded copies of contained APKs and declared size/SHA-256')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
         x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
+    q = cmd('diff', 'Compare two APK ZIPs without modifying them', diff)
+    q.add_argument('old'); q.add_argument('new')
+    zip_limits(q)
     q = cmd('inventory', 'List asset and native library paths', inventory)
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive path substring')
     q.add_argument('--text', help='Search UTF-8 asset contents (bounded and case-insensitive)')
@@ -742,7 +762,7 @@ def main(argv: Any=None) -> int:
         r.setdefault('warnings', []).append('Installing or launching untrusted APKs can execute code and alter device state; use an isolated disposable emulator.')
     elif args.command == 'setup' and args.install:
         r.setdefault('warnings', []).append('Installing packages executes external code and modifies the system; review sources and use isolation.')
-    elif args.command in ('jadx', 'work', 'splits', 'inventory', 'inspect', 'dex'):
+    elif args.command in ('jadx', 'work', 'splits', 'inventory', 'inspect', 'dex', 'diff'):
         r.setdefault('warnings', []).append('External tools may process untrusted input; process cleanup and output limits are not a sandbox.')
     try:
         emit(r, args.report, args.summary, args.redact)

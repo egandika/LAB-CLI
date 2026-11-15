@@ -19,6 +19,7 @@ APKLab helps inspect Android packages, explore DEX and assets, and prepare modif
 | `dex` | Index DEX identifiers, manifest permissions/components, and heuristic obfuscation hints. |
 | `jadx` | Decompile a temporary APK copy to a new output directory with monitored limits. |
 | `inventory` | List assets and native libraries; search bounded text and inspect native symbols. |
+| `diff` | Compare entries in two APK files without modifying them. |
 | `work` | Create a copy-based workspace for apktool/JADX, rebuilding, alignment, signing, and verification. |
 | `splits` | Apply copy-based workflow stages across multiple APKs. |
 | `device` | Opt in to installation and optional launcher-event tests on a disposable emulator. |
@@ -105,6 +106,7 @@ apklab inspect base.apk split_config.arm64_v8a.apk --split-types
 apklab inspect app.apk --zip-alignment 16
 apklab inspect ./split-directory --recursive --device-abi arm64-v8a --report inspection.json
 apklab dex app.apk --search login --limit 50
+apklab diff old.apk new.apk
 apklab jadx app.apk ./jadx-output --timeout 600 --max-output-mib 128
 apklab inventory app.apk --search lib --native-details --native-symbols --hash
 apklab inventory base.apk --split-awareness
@@ -118,6 +120,8 @@ With `--split-types`, `inspect` first copies every selected input to a temporary
 `inspect --zip-alignment 16` observes the local ZIP data offset of each stored `lib/*/*.so`; compressed libraries are untested for mmap alignment. This checks neither other entries nor ELF alignment and is not a substitute for `zipalign` or runtime testing.
 
 When metadata is available, `inspect` lists APKs without a reported split name as **base candidates**, not confirmed bases. `--device-abi` compares native directory names only; it does not establish compatibility or select the correct splits.
+
+`diff` compares SHA-256 and ZIP sizes per entry in two validated APKs and reports readable package/version literals as AXML inferences. Duplicate entry names are rejected. It does not compare split sets, signatures, runtime behavior, or decoded resource semantics.
 
 `inventory --split-awareness` reads literal `requiredSplitTypes` with the partial internal AXML parser as an inference, and marks other APKs and legacy `isSplitRequired` untested. An empty inventory or absent declaration never proves the whole app has no native libraries or assets.
 
