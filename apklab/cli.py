@@ -220,6 +220,20 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
             type_records.append({'id': item['file'], 'apk': item, 'types': observation, 'dependencies': prior['dependencies']})
         r['split_type_observations'] = [{'file': record['id'], **record['types']} for record in type_records]
         r['split_types'] = report_split_types(type_records, r)
+    if getattr(args, 'signing_details', False):
+        from .signing_details import parse_schemes
+        r['signing_details'] = []
+        signer = find_tool('apksigner')
+        for item in r['apks']:
+            result = None
+            if signer and 'entries' in item:
+                result = run([signer, 'verify', '--verbose', '--print-certs', item['file']])
+            schemes = parse_schemes(result or {})
+            r['signing_details'].append({'file': item['file'], 'schemes': schemes})
+            for name, status in schemes.items():
+                if status == 'verified': add(r, 'verified', item['file'], 'apksigner reports ' + name + ' scheme verified')
+                else: add(r, 'not_tested', item['file'], name + (' not verified by apksigner' if status == 'not_verified' else ' status unavailable'))
+        add(r, 'not_tested', 'signing details', 'Certificate trust, signer lineage and external .idsig sidecars are not independently checked')
     if getattr(args, 'manifest_security', False):
         from .axml import read_manifest
         r['manifest_security'] = []
@@ -705,6 +719,7 @@ def parser() -> argparse.ArgumentParser:
     q.add_argument('--split-types', action='store_true', help='Compare literal required and provided split types from supplied APKs')
     q.add_argument('--max-copy-mib', type=int, default=512, help='Maximum physical size per --split-types copy in MiB (default 512)')
     q.add_argument('--max-copy-total-mib', type=int, default=2048, help='Maximum total physical size of --split-types copies in MiB (default 2048)')
+    q.add_argument('--signing-details', action='store_true', help='Report apksigner per-scheme verification when available')
     q.add_argument('--manifest-security', action='store_true', help='Inventory explicit manifest security attributes as inferences')
     q.add_argument('--zip-alignment', type=int, choices=(16,), help='Observe stored native-library ZIP offsets (KiB)')
     q.add_argument('--device-abi', help='Compare a device ABI with observed native library directory names')

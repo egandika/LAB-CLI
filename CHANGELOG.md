@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Report explicit per-scheme apksigner verification results when available.
+
 - Inventory selected explicit manifest security attributes as partial AXML inferences, not vulnerability verdicts.
 
 - Add read-only APK set archive inventory without device targeting or extraction.
