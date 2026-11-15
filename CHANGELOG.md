@@ -2,6 +2,18 @@
 
 ## 0.5.0 (unreleased)
 
+- Upgrade the reverse-engineering workflow with hypotheses, evidence provenance, cross-checks, confidence and explicit stop/unknown conditions.
+
+- Add dedicated, guidance-only black-box testing and bounded parser-fuzzing methods; do not imply current device support is full dynamic analysis or that smoke mutations are coverage-guided fuzzing.
+
+- Add a deterministic synthetic AXML/DEX and in-memory ZIP mutation smoke harness with seed, case, and input caps; it executes no APK code and adds no dependency.
+
+- Report malformed deflate streams with the affected ZIP entry instead of surfacing an unscoped low-level zlib error.
+
+- Strengthen white-box test design, review findings, debugging/reproduction, split analysis, reports, and reversible repository prototyping guidance.
+
+- Route nine method categories through the existing orchestrator/agent plan and add method-tagged manual evaluation scenarios; real agent/plugin-host behavior remains untested.
+
 - Add read-only-by-default code review guidance with evidence and test limitations.
 
 - Add source-informed white-box testing guidance with mock and integration boundaries.

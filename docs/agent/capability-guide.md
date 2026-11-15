@@ -2,11 +2,25 @@
 
 For authorized applications only. Read `AGENTS.md` and the relevant skill in `.agents/skills/` when present. These are instructions, not permission enforcement or a sandbox. A platform may not discover or invoke them automatically. Chat without filesystem or terminal access cannot run APKLab; guide the user, request sanitized results, and never claim execution.
 
-## Choose by objective
+## Method map
 
-The instruction-only `apklab-orchestrator` recommends relevant skill bodies by goal; it does not enforce permissions or guarantee discovery. For broad APK reverse engineering, use `apklab-reverse-engineering` to select existing stages. For repository testing or review, use `apklab-white-box-testing` or `apklab-code-review` as relevant. Do not load every skill body by default. `agent plan` remains a separate deterministic command, not automatic skill selection.
+The instruction-only `apklab-orchestrator` selects one primary method and only necessary supporting skills; it neither enforces permission nor proves a host discovered the skill. Read only the selected skill bodies. The method names below describe procedures, not capabilities guaranteed by the installed tools.
 
-For a non-executing structured recommendation, use `apklab agent plan --goal triage --kind xapk`; consult its `--help` for goals and kinds. The plan checks no files or tool availability and intentionally returns `not_tested` with exit 3. Unsupported combinations fail. Steps typed `guidance` have no command; command names require arguments and are not shell invocations. `--report` creates a file.
+| Method | Existing skill / implementation | What it can do and what it cannot claim |
+| --- | --- | --- |
+| Reverse engineering | `apklab-reverse-engineering` with `apklab-triage`, `apklab-investigate`, `apklab-split-check`, and `apklab-report` as needed | Build evidence-led static analysis from bounded APKLab results; not complete source recovery, device targeting, or proof of runtime behavior. |
+| Forward engineering | `apklab-repo-maintenance` | Turn repo requests into acceptance criteria, focused changes and regression tests; not an APK feature builder unless the user requests and the relevant source/build path exists. |
+| Black-box testing | `apklab-black-box-testing`; existing `apklab device` command | Current CLI checks selected metadata, install status and optionally one launcher event on an approved disposable emulator. It does not capture UI, logs, crashes, network traffic, or feature behavior. |
+| White-box testing | `apklab-white-box-testing` | Test APKLab source with synthetic fixtures, mocks, and separately gated integration tests; not white-box access to a target app that has no source. |
+| Fuzzing | `apklab-fuzzing`; `python3 tests/fuzz_parser_inputs.py` | Bounded deterministic mutations of synthetic AXML/DEX inputs and an in-memory APK ZIP. This is not coverage-guided fuzzing, live-app fuzzing, a sandbox, or a security audit. |
+| Debugging | `apklab-error-triage` | Reproduce and narrow reported failures from sanitized commands/reports; not an interactive source debugger or proof of root cause without reproduction. |
+| Code review | `apklab-code-review` | Structured, evidence-based review of a supplied repository diff; no automated analyzer or guarantee that all defects are found. |
+| Prototyping | `apklab-repo-maintenance` | Keep a small prototype isolated and reversible; promotion and integration require review. |
+| API analysis / reverse | `apklab-investigate` | Trace static URL/API strings to indexed/decompiled code when available; no endpoint contact, traffic capture, replay, or proof of runtime API calls. |
+
+For structured, non-executing guidance, use `apklab agent plan`; consult `--help` for supported goal/kind pairs, including `black-box/apk`, `black-box/splits`, and `fuzz/parser`. The JSON `agent_plan.recommended_skills` field names suggested instruction files; it does not show that a host discovered, loaded, or followed them. The plan reads no inputs, checks no tools, runs no steps, grants no permission, and reports `not_tested` with exit 3. Unsupported pairs fail closed. A `guidance` step has a null command; command names still need approved paths and arguments. `--report` creates a file.
+
+## Command capability matrix
 
 | Goal | Relevant command | Important limits |
 | --- | --- | --- |
