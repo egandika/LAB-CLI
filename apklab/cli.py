@@ -220,6 +220,22 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
             type_records.append({'id': item['file'], 'apk': item, 'types': observation, 'dependencies': prior['dependencies']})
         r['split_type_observations'] = [{'file': record['id'], **record['types']} for record in type_records]
         r['split_types'] = report_split_types(type_records, r)
+    if getattr(args, 'zip_alignment', None):
+        from .zip_alignment import native_offsets
+        r['zip_alignment'] = []
+        for item in r['apks']:
+            if 'entries' not in item:
+                add(r, 'not_tested', item['file'], 'ZIP library offsets not inspected because APK validation failed')
+                continue
+            observations = native_offsets(item['file'], args.zip_alignment * 1024)
+            r['zip_alignment'].append({'file': item['file'], 'libraries': observations})
+            if not observations: add(r, 'not_tested', item['file'], 'No native library ZIP entries observed')
+            for library in observations:
+                subject = item['file'] + ':' + library['path'] + '#' + str(library['zip_entry_index'])
+                if library['status'] != 'observed': add(r, 'not_tested', subject, library['reason'])
+                elif library['aligned']: add(r, 'verified', subject, 'Stored library data offset is aligned to 16 KiB')
+                else: add(r, 'failures', subject, 'Stored library data offset is not aligned to 16 KiB')
+        add(r, 'not_tested', 'ZIP alignment scope', 'Other ZIP entries, ELF alignment and runtime compatibility were not checked by this observation')
     if args.device_abi:
         present = sorted({abi for apk in r['apks'] for abi in apk['architectures']})
         r['abi_observation'] = {'requested': args.device_abi, 'native_directories': present}
@@ -638,6 +654,7 @@ def parser() -> argparse.ArgumentParser:
     q.add_argument('--split-types', action='store_true', help='Compare literal required and provided split types from supplied APKs')
     q.add_argument('--max-copy-mib', type=int, default=512, help='Maximum physical size per --split-types copy in MiB (default 512)')
     q.add_argument('--max-copy-total-mib', type=int, default=2048, help='Maximum total physical size of --split-types copies in MiB (default 2048)')
+    q.add_argument('--zip-alignment', type=int, choices=(16,), help='Observe stored native-library ZIP offsets (KiB)')
     q.add_argument('--device-abi', help='Compare a device ABI with observed native library directory names')
     zip_limits(q)
     q = cmd('xapk', 'Safely inspect, unpack, or repack XAPK archives', xapk)
