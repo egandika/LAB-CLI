@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Correct the apksigner success message in workspace verification reports.
+
 - Bound physical input-copy size and count for opt-in split type inspection.
 
 - Avoid split-type comparisons for known conflicting major version codes and report unverified major versions.

@@ -481,7 +481,7 @@ def work(args: argparse.Namespace, _report: Any) -> dict:
             result = run([tool] + flags + [src], timeout=120)
             r['checks'][label] = result
             if result['returncode'] == 0:
-                add(r, 'verified', label, 'ZIP verification command succeeded for ' + str(src))
+                add(r, 'verified', label, ('Signature verification' if label == 'apksigner' else 'ZIP verification') + ' command succeeded for ' + str(src))
             else:
                 add(r, 'failures', label, 'Verification command failed: ' + (result['stderr'] or result['stdout'])[:2000])
         from .elf import load_alignment, UnsupportedElf

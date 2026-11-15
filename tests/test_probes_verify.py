@@ -95,6 +95,9 @@ class ProbeAndVerifyTests(unittest.TestCase):
         with patch('apklab.cli.supports_16k', return_value=False), patch('apklab.cli.find_tool', return_value='/fake/tool'), patch('apklab.cli.run', return_value={'returncode': 0, 'stdout': '', 'stderr': ''}):
             code, r = self.call('work', 'verify', str(self.workspace))
         self.assertEqual(code, 3); self.assertEqual(len(r['verified']), 2)
+        messages = {entry['subject']: entry['detail'] for entry in r['verified']}
+        self.assertIn('Signature verification', messages['apksigner'])
+        self.assertIn('ZIP verification', messages['zipalign'])
         self.assertTrue(any(x['subject'] == 'runtime' for x in r['not_tested']))
 
 if __name__ == '__main__': unittest.main()
