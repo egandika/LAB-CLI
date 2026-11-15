@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add instruction-only agent skills for APKLab triage, static investigation and evidence reporting.
+
 - Clarify agent permission, evidence and untrusted-input guidance; align the copyable prompt with setup approval.
 
 - Select preinstalled Android build-tools 35 for emulator integration to match the real-tool job.
