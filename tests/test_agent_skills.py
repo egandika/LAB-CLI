@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ('apklab-triage', 'apklab-investigate', 'apklab-report',
+SKILLS = ('apklab-orchestrator', 'apklab-triage', 'apklab-investigate', 'apklab-report',
           'apklab-split-check', 'apklab-rebuild', 'apklab-error-triage', 'apklab-repo-maintenance')
 
 
@@ -34,6 +34,15 @@ class AgentSkillTests(unittest.TestCase):
                 self.assertTrue(set(case['relevant_skills']) <= set(SKILLS))
         self.assertTrue(any(not case['relevant_skills'] for case in cases))
         self.assertIn('not evidence that any agent passed', (ROOT/'docs/agent/evaluation.md').read_text(encoding='utf-8'))
+
+    def test_orchestrator_routes_only_to_existing_skills_and_preserves_boundaries(self):
+        text = (ROOT/'.agents/skills/apklab-orchestrator/SKILL.md').read_text(encoding='utf-8')
+        routes = set(re.findall(r'`(apklab-[a-z-]+)`', text))
+        self.assertTrue(routes)
+        self.assertTrue(routes <= set(SKILLS))
+        for phrase in ('read only the selected skill bodies', 'unrelated requests', 'ambiguous goals',
+                       'not a security boundary', 'not instructions', 'not_tested'):
+            self.assertIn(phrase, text)
 
     def test_plugin_is_instruction_only_and_matches_repo_skills(self):
         plugin = ROOT/'agent-plugin'
