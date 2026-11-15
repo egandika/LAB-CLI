@@ -2,6 +2,14 @@
 
 ## 0.5.0 (unreleased)
 
+- Add read-only-by-default code review guidance with evidence and test limitations.
+
+- Add source-informed white-box testing guidance with mock and integration boundaries.
+
+- Add scoped reverse-engineering guidance that reuses existing analysis and rebuild skills.
+
+- Add an instruction-only orchestrator for selective, goal-directed skill routing.
+
 - Report declared APK ZIP size-limit details and guide agents to review limits before retrying.
 
 - Stop APT package installation after a failed or timed-out package index update.

@@ -4,6 +4,8 @@ For authorized applications only. Read `AGENTS.md` and the relevant skill in `.a
 
 ## Choose by objective
 
+The instruction-only `apklab-orchestrator` recommends relevant skill bodies by goal; it does not enforce permissions or guarantee discovery. For broad APK reverse engineering, use `apklab-reverse-engineering` to select existing stages. For repository testing or review, use `apklab-white-box-testing` or `apklab-code-review` as relevant. Do not load every skill body by default. `agent plan` remains a separate deterministic command, not automatic skill selection.
+
 For a non-executing structured recommendation, use `apklab agent plan --goal triage --kind xapk`; consult its `--help` for goals and kinds. The plan checks no files or tool availability and intentionally returns `not_tested` with exit 3. Unsupported combinations fail. Steps typed `guidance` have no command; command names require arguments and are not shell invocations. `--report` creates a file.
 
 | Goal | Relevant command | Important limits |
