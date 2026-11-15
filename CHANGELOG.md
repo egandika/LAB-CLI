@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Cover agent-plan subprocess reporting, no-overwrite behavior and unsupported goal/input pairs.
+
 - Distinguish non-executable guidance from real command names in structured agent plans.
 
 - Make baseline agent instructions goal-directed and consistent about permission for probes and extraction.

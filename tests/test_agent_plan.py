@@ -1,6 +1,10 @@
 import contextlib
 import io
 import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 from apklab.agent_plan import ROUTES, plan
@@ -49,6 +53,33 @@ class AgentPlanTests(unittest.TestCase):
         normalized = ' '.join(out.getvalue().split())
         for goal, kind in ROUTES:
             self.assertIn(goal + '/' + kind, normalized)
+
+    def test_cli_process_report_and_no_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / 'plan.json'
+            command = [sys.executable, '-m', 'apklab', 'agent', '--report', str(report_path),
+                       'plan', '--goal', 'triage', '--kind', 'xapk']
+            first = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            self.assertEqual(first.returncode, 3, first.stderr)
+            document = json.loads(first.stdout)
+            self.assertEqual(document, json.loads(report_path.read_text(encoding='utf-8')))
+            self.assertEqual(document['agent_plan']['steps'][0]['command'], 'xapk inspect')
+            original = report_path.read_bytes()
+            second = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            self.assertEqual(second.returncode, 1)
+            self.assertEqual(report_path.read_bytes(), original)
+            self.assertTrue(any(x['subject'] == 'report' for x in json.loads(second.stdout)['failures']))
+
+    def test_unsupported_combinations_fail_closed(self):
+        goals = {goal for goal, _ in ROUTES}
+        kinds = {kind for _, kind in ROUTES}
+        for goal in goals:
+            for kind in kinds:
+                if (goal, kind) not in ROUTES:
+                    with self.subTest(goal=goal, kind=kind):
+                        code, result = self.call('--goal', goal, '--kind', kind)
+                        self.assertEqual(code, 1)
+                        self.assertNotIn('agent_plan', result)
 
     def test_plan_reports_approval_and_limitations(self):
         _, result = self.call('--goal', 'rebuild', '--kind', 'apk')
