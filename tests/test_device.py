@@ -79,6 +79,8 @@ class DeviceTests(unittest.TestCase):
                 code, result = self.call('device', '--serial', 'emulator-5554', '--confirm-install', '--launch', str(self.apk))
             self.assertEqual(code, 1, result)
             self.assertFalse(any(x['subject'] == ('installation' if command == 'install' else 'launch') for x in result['verified']))
+            if command == 'install':
+                self.assertTrue(any('not confirmed' in x['detail'] and 'may have changed' in x['detail'] for x in result['failures']))
 
     def test_modern_split_type_block_and_unknowns(self):
         from apklab.split_metadata import parse_split_types

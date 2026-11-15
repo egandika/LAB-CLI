@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Clarify that an unconfirmed ADB install may still have changed emulator state.
+
 - Clarify that internal AXML may infer, but does not confirm, a base candidate.
 
 - Publish bounded integration-test failure diagnostics in CI annotations; this does not establish that Android integration passes.

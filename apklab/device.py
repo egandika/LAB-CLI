@@ -91,7 +91,7 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
         result = adb_command('install-multiple' if len(copies) > 1 else 'install', *copies)
         r['install'] = result
         if not complete(result) or not re.search(r'(?m)^Success\s*$', result['stdout']):
-            add(r, 'failures', 'installation', 'ADB installation failed; see install result')
+            add(r, 'failures', 'installation', 'ADB installation was not confirmed; device state may have changed; see install result')
             return r
         add(r, 'verified', 'installation', 'ADB reported installation success on the selected emulator')
         r['package'] = package
