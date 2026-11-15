@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Report declared APK ZIP size-limit details and guide agents to review limits before retrying.
+
 - Stop APT package installation after a failed or timed-out package index update.
 
 - Add non-installing goal-specific tool discovery to setup plans; prevent combining goals with the broad APT installer.

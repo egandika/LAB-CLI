@@ -65,6 +65,16 @@ class AgentSkillTests(unittest.TestCase):
             with self.subTest(skill=name):
                 self.assertIn(phrase, (base/name/'SKILL.md').read_text(encoding='utf-8'))
 
+    def test_size_limit_guidance_is_scoped_and_has_evaluation(self):
+        skill = (ROOT/'.agents/skills/apklab-error-triage/SKILL.md').read_text(encoding='utf-8')
+        for phrase in ('untrusted ZIP metadata', 'different limits', 'ask before increasing', 'never retry automatically'):
+            self.assertIn(phrase, skill)
+        cases = json.loads((ROOT/'tests/agent_evals/scenarios.json').read_text(encoding='utf-8'))
+        scenario = next(case for case in cases if case['id'] == 'apk-size-limit')
+        self.assertIn('apklab-error-triage', scenario['relevant_skills'])
+        self.assertTrue(any('ask before increasing' in entry for entry in scenario['expect']))
+        self.assertIn('declared byte counts', (ROOT/'docs/agent/troubleshooting.md').read_text(encoding='utf-8'))
+
     def test_relevant_skill_risks_are_documented(self):
         base = ROOT / '.agents/skills'
         triage = (base/'apklab-triage/SKILL.md').read_text(encoding='utf-8')
