@@ -82,7 +82,7 @@ Repo-local instruction-only skills in `.agents/skills/` help with triage, invest
 
 ### Structured agent plan
 
-`apklab agent plan --goal triage --kind xapk` emits a deterministic JSON recommendation, without reading input files, discovering tools, running commands, or determining authorization. Supported goal/input combinations are listed in `apklab agent plan --help` and the capability guide; unsupported combinations fail. The plan intentionally reports these checks as `not_tested` and exits 3. It is guidance, not a permission gate or an MCP server. `--report` would write a new file and requires permission.
+`apklab agent plan --goal triage --kind xapk` emits a deterministic JSON recommendation, without reading input files, discovering tools, running commands, or determining authorization. Supported goal/input combinations are listed in `apklab agent plan --help` and the capability guide; unsupported combinations fail. The plan intentionally reports these checks as `not_tested` and exits 3. It is guidance, not a permission gate or an MCP server. For example, `apklab agent --report plan.json plan --goal triage --kind xapk` also writes a new file and requires permission.
 
 ## Tool discovery and setup
 
