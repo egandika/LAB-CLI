@@ -109,6 +109,7 @@ apklab inspect app.apk --manifest-security
 apklab inspect app.apk --signing-details
 apklab inspect ./split-directory --recursive --device-abi arm64-v8a --report inspection.json
 apklab dex app.apk --search login --limit 50
+apklab dex app.apk --check-integrity
 apklab diff old.apk new.apk
 apklab jadx app.apk ./jadx-output --timeout 600 --max-output-mib 128
 apklab inventory app.apk --search lib --native-details --native-symbols --hash
@@ -127,6 +128,8 @@ With `--split-types`, `inspect` first copies every selected input to a temporary
 `inspect --zip-alignment 16` observes the local ZIP data offset of each stored `lib/*/*.so`; compressed libraries are untested for mmap alignment. This checks neither other entries nor ELF alignment and is not a substitute for `zipalign` or runtime testing.
 
 When metadata is available, `inspect` lists APKs without a reported split name as **base candidates**, not confirmed bases. `--device-abi` compares native directory names only; it does not establish compatibility or select the correct splits.
+
+`dex --check-integrity` compares SHA-1 and Adler-32 header values for supported DEX 035 and 037–040; DEX 041 container integrity is untested. These checks do not authenticate origin or validate bytecode behavior.
 
 `diff` compares SHA-256 and ZIP sizes per entry in two validated APKs and reports readable package/version literals as AXML inferences. Duplicate entry names are rejected. It does not compare split sets, signatures, runtime behavior, or decoded resource semantics.
 

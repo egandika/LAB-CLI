@@ -485,7 +485,16 @@ def dex(args: argparse.Namespace, _report: Any) -> dict:
         for index, info in dex_entries:
             name = info.filename
             try:
-                d = read_dex(z.read(info))
+                data = z.read(info)
+                if getattr(args, 'check_integrity', False):
+                    from .dex_integrity import check_integrity
+                    outcome = check_integrity(data)
+                    r.setdefault('dex_integrity', []).append({'file': name, 'zip_entry_index': index, **outcome})
+                    if outcome['status'] == 'not_tested': add(r, 'not_tested', name, outcome['reason'])
+                    else:
+                        for key in ('sha1_matches', 'adler32_matches'):
+                            add(r, 'verified' if outcome[key] else 'failures', name, 'DEX header ' + key.replace('_matches', '') + (' matches' if outcome[key] else ' mismatch'))
+                d = read_dex(data)
                 term = args.search.lower() if args.search else None
                 match = lambda values: [x for x in values if not term or term in x.lower()][:args.limit]
                 classes, methods = d['classes'], d['methods']
@@ -501,6 +510,8 @@ def dex(args: argparse.Namespace, _report: Any) -> dict:
                 add(r, 'not_tested', name, str(e))
             except (ValueError, IndexError, zipfile.BadZipFile) as e:
                 add(r, 'failures', name, str(e))
+    if getattr(args, 'check_integrity', False):
+        add(r, 'not_tested', 'DEX integrity scope', 'DEX header digests do not authenticate origin or validate bytecode semantics')
     tool = find_tool('aapt')
     if not tool:
         from .axml import read_manifest
@@ -761,6 +772,7 @@ def parser() -> argparse.ArgumentParser:
     q.add_argument('--native-symbols', action='store_true', help='Index available native symbol tables with readelf')
     zip_limits(q)
     q = cmd('dex', 'Index DEX classes, methods, API references, strings, URLs, and possible models', dex)
+    q.add_argument('--check-integrity', action='store_true', help='Check supported DEX header SHA-1 and Adler-32')
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive substring filter')
     q.add_argument('--limit', type=int, default=200, help='Maximum entries per list (default 200)')
     zip_limits(q)

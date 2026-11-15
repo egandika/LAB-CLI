@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Check supported DEX header SHA-1 and Adler-32 integrity without claiming authenticity.
+
 - Report explicit per-scheme apksigner verification results when available.
 
 - Inventory selected explicit manifest security attributes as partial AXML inferences, not vulnerability verdicts.
