@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Select preinstalled Android build-tools 35 for emulator integration to match the real-tool job.
+
 - Fix real-tool split fixture manifest filenames for aapt; cover fixture commands with a mock regression test.
 
 - Apply bounded inner ZIP expansion limits when inspecting contained XAPK APKs.

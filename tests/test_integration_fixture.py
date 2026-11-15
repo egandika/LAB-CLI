@@ -10,6 +10,13 @@ import test_integration
 
 
 class SplitFixtureCommandTests(unittest.TestCase):
+    def test_emulator_uses_installed_sdk_build_tools(self):
+        workflow = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
+        emulator = workflow.split('  emulator:', 1)[1]
+        self.assertIn('build-tools/35.0.0/aapt', emulator)
+        self.assertIn('echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"', emulator)
+        self.assertLess(emulator.index('Select installed Android build tools'), emulator.index('Install and launch test APK in disposable emulator'))
+
     def test_aapt_gets_distinct_canonical_manifest_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); sdk = root / 'sdk'
