@@ -24,6 +24,17 @@ class AgentSkillTests(unittest.TestCase):
                 self.assertTrue(parts[2].strip())
                 self.assertNotIn('allowed-tools:', parts[1])
                 self.assertNotIn('hooks:', parts[1])
+    def test_evaluation_scenarios_are_well_formed_and_reference_known_skills(self):
+        cases = json.loads((ROOT/'tests/agent_evals/scenarios.json').read_text(encoding='utf-8'))
+        self.assertGreaterEqual(len(cases), 10)
+        self.assertEqual(len({case['id'] for case in cases}), len(cases))
+        for case in cases:
+            with self.subTest(case=case['id']):
+                self.assertTrue(case['prompt']); self.assertTrue(case['expect'])
+                self.assertTrue(set(case['relevant_skills']) <= set(SKILLS))
+        self.assertTrue(any(not case['relevant_skills'] for case in cases))
+        self.assertIn('not evidence that any agent passed', (ROOT/'docs/agent/evaluation.md').read_text(encoding='utf-8'))
+
     def test_plugin_is_instruction_only_and_matches_repo_skills(self):
         plugin = ROOT/'agent-plugin'
         manifest = json.loads((plugin/'plugin.json').read_text(encoding='utf-8'))

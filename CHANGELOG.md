@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add a scenario set and manual protocol for evaluating agent behavior and skill activation.
+
 - Add non-executing structured `agent plan` workflow recommendations.
 
 - Add an optional instruction-only portable plugin package mirroring the agent skills; real host compatibility is untested.
