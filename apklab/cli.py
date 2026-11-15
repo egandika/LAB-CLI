@@ -18,7 +18,10 @@ from .splits import init_set, read_set
 from .setup_plan import plan as setup_guidance, NEXT
 from .jadx import decompile
 from .analysis import parse_xmltree, candidates, magic_type
-from .split_metadata import assess_outputs, read_dependencies
+from .split_metadata import assess_outputs, read_dependencies, read_split_types, report_split_types, unavailable_split_types
+
+
+MAX_SPLIT_TYPE_INPUTS = 1000
 
 
 VERSION_ARGS = {
@@ -127,6 +130,56 @@ def apk_paths(inputs: Any, recursive: bool=False) -> list:
 
 @reported
 def inspect(args: argparse.Namespace, _report: Any) -> dict:
+    if not getattr(args, 'split_types', False):
+        return _inspect_inputs(args, _report)
+    # All inspection, including external tools, runs on temporary copies.
+    import stat
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='apklab-split-types-') as tmp:
+        originals = apk_paths(args.apks, args.recursive)
+        if len(originals) > MAX_SPLIT_TYPE_INPUTS:
+            raise ValueError('Split type input count exceeds 1000')
+        per_file = args.max_copy_mib * MIB
+        total_limit = args.max_copy_total_mib * MIB
+        if per_file < 1 or total_limit < 1:
+            raise ValueError('Copy size limits must be positive')
+        copied_total = 0
+        copies = []
+        replacements = {}
+        for index, source in enumerate(originals):
+            copy = Path(tmp) / ('input-%04d%s' % (index, source.suffix))
+            copied = 0
+            fd = os.open(source, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0))
+            with os.fdopen(fd, 'rb') as src, copy.open('xb') as dest:
+                info = os.fstat(src.fileno())
+                if not stat.S_ISREG(info.st_mode): raise ValueError('Split input must be a regular file')
+                if info.st_size > per_file or copied_total + info.st_size > total_limit:
+                    raise ValueError('Split type copy size limit exceeded')
+                while True:
+                    chunk = src.read(min(MIB, per_file - copied + 1, total_limit - copied_total + 1))
+                    if not chunk: break
+                    copied += len(chunk)
+                    copied_total += len(chunk)
+                    if copied > per_file or copied_total > total_limit:
+                        raise ValueError('Split type copy size limit exceeded')
+                    dest.write(chunk)
+            copies.append(str(copy))
+            replacements[str(copy)] = str(source)
+        staged = argparse.Namespace(**vars(args))
+        staged.apks = copies
+        staged.recursive = False
+        result = _inspect_inputs(staged, _report)
+        def restore(value):
+            if isinstance(value, str):
+                for copy, source in replacements.items(): value = value.replace(copy, source)
+                return value
+            if isinstance(value, list): return [restore(item) for item in value]
+            if isinstance(value, dict): return {restore(key): restore(item) for key, item in value.items()}
+            return value
+        return restore(result)
+
+
+def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['apks'] = []
     for p in apk_paths(args.apks, args.recursive):
@@ -135,12 +188,10 @@ def inspect(args: argparse.Namespace, _report: Any) -> dict:
         for field, label in [('package', 'package names'), ('version_code', 'version codes'), ('signer_sha256', 'signer certificate digest sets')]:
             values = [tuple(a[field]) if field == 'signer_sha256' and a[field] else a[field] for a in r['apks']]
             known = {v for v in values if v}
-            if len(known) > 1:
-                add(r, 'failures', 'split set', 'Different ' + label + ' found')
-            elif len(known) == 1 and all(values):
+            if len(known) == 1 and all(values):
                 category = 'inferences' if field != 'signer_sha256' and any(a.get('metadata_source') == 'internal_axml' for a in r['apks']) else 'verified'
                 add(r, category, 'split set', 'Matching ' + label + ' across all inspected APKs')
-            else:
+            elif len(known) <= 1:
                 add(r, 'not_tested', 'split set', 'Cannot compare ' + label + ' for every APK')
         split_names = [a.get('split') for a in r['apks'] if a.get('split')]
         if all(a.get('package') and 'split' in a for a in r['apks']):
@@ -158,8 +209,65 @@ def inspect(args: argparse.Namespace, _report: Any) -> dict:
     r['split_observations'] = observations
     r['split_analysis'] = assess_outputs(observations)
     for issue in r['split_analysis']['issues']: add(r, 'failures', 'split set', issue)
+    for inference in r['split_analysis']['inferences']: add(r, 'inferences', 'split set', inference)
     for unknown in r['split_analysis']['unknown']:
         add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
+    if getattr(args, 'split_types', False):
+        type_records = []
+        for item, prior in zip(r['apks'], observations):
+            observation = (read_split_types(item['file']) if 'entries' in item
+                           else unavailable_split_types('APK ZIP validation did not succeed'))
+            type_records.append({'id': item['file'], 'apk': item, 'types': observation, 'dependencies': prior['dependencies']})
+        r['split_type_observations'] = [{'file': record['id'], **record['types']} for record in type_records]
+        r['split_types'] = report_split_types(type_records, r)
+    if getattr(args, 'signing_details', False):
+        from .signing_details import parse_schemes
+        r['signing_details'] = []
+        signer = find_tool('apksigner')
+        for item in r['apks']:
+            result = None
+            if signer and 'entries' in item:
+                result = run([signer, 'verify', '--verbose', '--print-certs', item['file']])
+            schemes = parse_schemes(result or {})
+            r['signing_details'].append({'file': item['file'], 'schemes': schemes})
+            for name, status in schemes.items():
+                if status == 'verified': add(r, 'verified', item['file'], 'apksigner reports ' + name + ' scheme verified')
+                else: add(r, 'not_tested', item['file'], name + (' not verified by apksigner' if status == 'not_verified' else ' status unavailable'))
+        add(r, 'not_tested', 'signing details', 'Certificate trust, signer lineage and external .idsig sidecars are not independently checked')
+    if getattr(args, 'manifest_security', False):
+        from .axml import read_manifest
+        r['manifest_security'] = []
+        for item in r['apks']:
+            if 'entries' not in item:
+                add(r, 'not_tested', item['file'], 'Manifest security inventory requires a valid APK ZIP')
+                continue
+            try:
+                manifest = read_manifest(item['file'])
+                security = manifest['security']
+                r['manifest_security'].append({'file': item['file'], 'source': 'internal_axml', **security})
+                add(r, 'inferences', item['file'], 'Selected explicit manifest security attributes read via partial internal AXML')
+                fields = list(security['application'].values()) + [value for component in security['components'] for value in component['attributes'].values()]
+                if any(field['status'] == 'unknown' for field in fields):
+                    add(r, 'not_tested', item['file'], 'Some manifest security attributes are unresolved')
+            except (ValueError, KeyError, OSError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+                add(r, 'not_tested', item['file'], 'Manifest security attributes unavailable: ' + str(exc))
+        add(r, 'not_tested', 'manifest security', 'Defaults, inherited permissions, API-level behavior, code-level checks and vulnerabilities are not determined')
+    if getattr(args, 'zip_alignment', None):
+        from .zip_alignment import native_offsets
+        r['zip_alignment'] = []
+        for item in r['apks']:
+            if 'entries' not in item:
+                add(r, 'not_tested', item['file'], 'ZIP library offsets not inspected because APK validation failed')
+                continue
+            observations = native_offsets(item['file'], args.zip_alignment * 1024)
+            r['zip_alignment'].append({'file': item['file'], 'libraries': observations})
+            if not observations: add(r, 'not_tested', item['file'], 'No native library ZIP entries observed')
+            for library in observations:
+                subject = item['file'] + ':' + library['path'] + '#' + str(library['zip_entry_index'])
+                if library['status'] != 'observed': add(r, 'not_tested', subject, library['reason'])
+                elif library['aligned']: add(r, 'verified', subject, 'Stored library data offset is aligned to 16 KiB')
+                else: add(r, 'failures', subject, 'Stored library data offset is not aligned to 16 KiB')
+        add(r, 'not_tested', 'ZIP alignment scope', 'Other ZIP entries, ELF alignment and runtime compatibility were not checked by this observation')
     if args.device_abi:
         present = sorted({abi for apk in r['apks'] for abi in apk['architectures']})
         r['abi_observation'] = {'requested': args.device_abi, 'native_directories': present}
@@ -195,7 +303,8 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
             add(r, 'failures', 'XAPK manifest', manifest['reason'])
         else:
             add(r, 'not_tested', 'XAPK manifest', 'No supported split_apks list: ' + manifest.get('reason', manifest['status']))
-        add(r, 'not_tested', 'contained APKs', 'APK metadata, signatures and split compatibility are not checked here; run inspect on extracted APKs')
+        if args.action != 'inspect' or not getattr(args, 'check_apks', False):
+            add(r, 'not_tested', 'contained APKs', 'APK metadata, signatures and split compatibility are not checked here; run inspect on extracted APKs')
         add(r, 'not_tested', 'XAPK layout', 'Manifest completeness, OBB compatibility and installation are not validated')
 
     if args.action == 'inspect':
@@ -206,6 +315,9 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
         else:
             add(r, 'not_tested', 'XAPK CRC', 'Use --verify to read and CRC-check all file entries')
         describe(entries, args.archive)
+        if getattr(args, 'check_apks', False):
+            from .xapk_checks import check_members
+            r['contained_apks'] = check_members(args.archive, r, entry, total)
         return r
 
     destination = Path(args.destination)
@@ -240,6 +352,39 @@ def xapk(args: argparse.Namespace, _report: Any) -> dict:
 
 
 @reported
+def apks(args: argparse.Namespace, _report: Any) -> dict:
+    r = _report
+    entries = examine_xapk(args.archive, args.max_entry_mib * MIB, args.max_total_mib * MIB, args.verify)
+    r['entries'] = entries
+    add(r, 'verified', 'APKS archive', 'Listed validated ZIP directory entries and checked safe paths and limits')
+    if args.verify: add(r, 'verified', 'APKS archive', 'Read all file entries and checked CRC; SHA-256 recorded per entry')
+    else: add(r, 'not_tested', 'APKS CRC', 'Use --verify to read entry contents and check CRC')
+    if not any(entry['kind'] == 'apk' for entry in entries):
+        add(r, 'failures', 'APKS archive', 'No APK entries found')
+    r['toc_present'] = any(entry['path'] == 'toc.pb' and entry['kind'] == 'other' for entry in entries)
+    add(r, 'not_tested', 'APKS targeting', 'toc.pb and device targeting are not parsed; no splits were selected')
+    add(r, 'not_tested', 'contained APKs', 'Inner APK validity, signatures, set completeness and installation were not checked')
+    return r
+
+
+@reported
+def diff(args: argparse.Namespace, _report: Any) -> dict:
+    from .diff import snapshot, compare
+    r = _report
+    old = snapshot(args.old, args.max_entry_mib * MIB, args.max_total_mib * MIB)
+    new = snapshot(args.new, args.max_entry_mib * MIB, args.max_total_mib * MIB)
+    r['diff'] = compare(old, new)
+    r['metadata'] = {'old': old['metadata'], 'new': new['metadata']}
+    add(r, 'verified', 'APK diff', 'Compared per-entry SHA-256, compressed and uncompressed sizes of two CRC-checked ZIPs')
+    for field in ('package', 'version_code', 'version_name'):
+        a, b = old['metadata'].get(field), new['metadata'].get(field)
+        if a is None or b is None: add(r, 'not_tested', 'APK diff metadata', field + ' was unavailable in at least one APK')
+        else: add(r, 'inferences', 'APK diff metadata', field + (' matches' if a == b else ' differs') + ' based on internal AXML')
+    add(r, 'not_tested', 'APK diff', 'ABI directory names do not prove compatibility; behavior, signatures, split-set equivalence and semantic resource changes are not established')
+    return r
+
+
+@reported
 def inventory(args: argparse.Namespace, _report: Any) -> dict:
     r = _report
     r['files'] = []
@@ -253,6 +398,26 @@ def inventory(args: argparse.Namespace, _report: Any) -> dict:
                 matches.append(info)
                 r['files'].append({'path': n, 'size': info.file_size, 'category': category})
         add(r, 'verified', 'inventory', 'Indexed matching ZIP entry names and sizes')
+        if getattr(args, 'split_awareness', False):
+            from .axml import MAX_MANIFEST, parse_manifest
+            from .split_metadata import _type_values
+            try:
+                info = next(i for i in infos if i.filename == 'AndroidManifest.xml' and not i.is_dir())
+                if info.file_size > MAX_MANIFEST: raise ValueError('Manifest exceeds AXML limit')
+                manifest = parse_manifest(z.read(info))
+                attr = _type_values(manifest['split_type_attributes']['requiredSplitTypes'])
+                r['split_awareness'] = {'source': 'internal_axml', 'required_split_types': attr,
+                                        'scope': 'This APK only; other APKs were not inspected'}
+                if attr['status'] == 'literal' and attr.get('types'):
+                    add(r, 'inferences', 'inventory split awareness', 'Literal required split types observed via internal AXML; assets and native libraries may be in other APKs')
+                elif attr['status'] == 'unknown':
+                    add(r, 'not_tested', 'inventory split awareness', 'Required split types are unresolved')
+                else:
+                    add(r, 'inferences', 'inventory split awareness', 'No nonempty literal required split types observed via internal AXML')
+            except (ValueError, KeyError, OSError, zipfile.BadZipFile, RuntimeError) as exc:
+                r['split_awareness'] = {'source': 'unavailable', 'reason': str(exc)}
+                add(r, 'not_tested', 'inventory split awareness', 'Manifest could not be examined')
+            add(r, 'not_tested', 'inventory scope', 'Only this APK was inventoried; split completeness and isSplitRequired are not established')
         import hashlib
         for info, item in zip(matches, r['files']):
             if info.is_dir(): continue
@@ -320,7 +485,16 @@ def dex(args: argparse.Namespace, _report: Any) -> dict:
         for index, info in dex_entries:
             name = info.filename
             try:
-                d = read_dex(z.read(info))
+                data = z.read(info)
+                if getattr(args, 'check_integrity', False):
+                    from .dex_integrity import check_integrity
+                    outcome = check_integrity(data)
+                    r.setdefault('dex_integrity', []).append({'file': name, 'zip_entry_index': index, **outcome})
+                    if outcome['status'] == 'not_tested': add(r, 'not_tested', name, outcome['reason'])
+                    else:
+                        for key in ('sha1_matches', 'adler32_matches'):
+                            add(r, 'verified' if outcome[key] else 'failures', name, 'DEX header ' + key.replace('_matches', '') + (' matches' if outcome[key] else ' mismatch'))
+                d = read_dex(data)
                 term = args.search.lower() if args.search else None
                 match = lambda values: [x for x in values if not term or term in x.lower()][:args.limit]
                 classes, methods = d['classes'], d['methods']
@@ -336,6 +510,8 @@ def dex(args: argparse.Namespace, _report: Any) -> dict:
                 add(r, 'not_tested', name, str(e))
             except (ValueError, IndexError, zipfile.BadZipFile) as e:
                 add(r, 'failures', name, str(e))
+    if getattr(args, 'check_integrity', False):
+        add(r, 'not_tested', 'DEX integrity scope', 'DEX header digests do not authenticate origin or validate bytecode semantics')
     tool = find_tool('aapt')
     if not tool:
         from .axml import read_manifest
@@ -397,7 +573,7 @@ def work(args: argparse.Namespace, _report: Any) -> dict:
             result = run([tool] + flags + [src], timeout=120)
             r['checks'][label] = result
             if result['returncode'] == 0:
-                add(r, 'verified', label, 'ZIP verification command succeeded for ' + str(src))
+                add(r, 'verified', label, ('Signature verification' if label == 'apksigner' else 'ZIP verification') + ' command succeeded for ' + str(src))
             else:
                 add(r, 'failures', label, 'Verification command failed: ' + (result['stderr'] or result['stdout'])[:2000])
         from .elf import load_alignment, UnsupportedElf
@@ -502,18 +678,23 @@ def splits(args: argparse.Namespace, _report: Any) -> dict:
                 if observed['apk'].get('signer_sha256'):
                     add(r, 'verified', item['id'], 'Signer certificate digest set read from verified signed output')
                 observed['dependencies'] = read_dependencies(signed)
+                observed['types'] = read_split_types(signed)
                 if observed['dependencies']['status'] != 'observed':
                     add(r, 'not_tested', item['id'], 'Split dependency metadata is unavailable or partial')
             except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
                 observed['error'] = str(exc)
                 add(r, 'not_tested', item['id'], 'Could not inspect signed output: ' + str(exc))
+            if 'types' not in observed:
+                observed['types'] = unavailable_split_types('signed output unavailable')
             result['inspection'] = observed
             observations.append(observed)
         r['members'].append(result)
     if args.stage == 'verify':
         analysis = assess_outputs(observations)
         r['split_analysis'] = analysis
+        r['split_types'] = report_split_types(observations, r)
         for issue in analysis['issues']: add(r, 'failures', 'split set', issue)
+        for inference in analysis['inferences']: add(r, 'inferences', 'split set', inference)
         for unknown in analysis['unknown']: add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every output')
     add(r, 'not_tested', 'split set', 'Operations may partially succeed; completeness, signer rotation compatibility, installability and runtime behavior are not verified')
     return r
@@ -546,6 +727,12 @@ def parser() -> argparse.ArgumentParser:
     q = cmd('inspect', 'Inspect one APK or a split set (files or directories)', inspect)
     q.add_argument('apks', nargs='+')
     q.add_argument('--recursive', action='store_true', help='Include APKs in subdirectories of supplied directories')
+    q.add_argument('--split-types', action='store_true', help='Compare literal required and provided split types from supplied APKs')
+    q.add_argument('--max-copy-mib', type=int, default=512, help='Maximum physical size per --split-types copy in MiB (default 512)')
+    q.add_argument('--max-copy-total-mib', type=int, default=2048, help='Maximum total physical size of --split-types copies in MiB (default 2048)')
+    q.add_argument('--signing-details', action='store_true', help='Report apksigner per-scheme verification when available')
+    q.add_argument('--manifest-security', action='store_true', help='Inventory explicit manifest security attributes as inferences')
+    q.add_argument('--zip-alignment', type=int, choices=(16,), help='Observe stored native-library ZIP offsets (KiB)')
     q.add_argument('--device-abi', help='Compare a device ABI with observed native library directory names')
     zip_limits(q)
     q = cmd('xapk', 'Safely inspect, unpack, or repack XAPK archives', xapk)
@@ -561,17 +748,31 @@ def parser() -> argparse.ArgumentParser:
             x.add_argument('--directory', action='store_true', help='Create new directory with repacked.xapk and manifest-validated OBB layout')
             x.add_argument('--update-manifest', action='store_true', help='Update size and sha256 in supported split_apks entries for replacements')
             x.add_argument('--replace', action='append', default=[], metavar='ENTRY=APK', help='Replace an existing APK entry; repeat as needed')
-        else: x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
+        else:
+            x.add_argument('--verify', action='store_true', help='Read every entry and verify ZIP CRC')
+            x.add_argument('--check-apks', action='store_true', help='Inspect bounded copies of contained APKs and declared size/SHA-256')
         x.add_argument('--max-entry-mib', type=int, default=2048, help='Max uncompressed entry size (default 2048 MiB)')
         x.add_argument('--max-total-mib', type=int, default=8192, help='Max total uncompressed size (default 8192 MiB)')
+    q = cmd('apks', 'Inspect an APK set archive without extracting or selecting splits', apks)
+    actions = q.add_subparsers(dest='action', required=True)
+    i = actions.add_parser('inspect', help='List APK set ZIP contents')
+    i.add_argument('--summary', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('--redact', action='store_true', default=argparse.SUPPRESS)
+    i.add_argument('archive'); i.add_argument('--verify', action='store_true', help='Read all entries and check CRC')
+    i.add_argument('--max-entry-mib', type=int, default=2048); i.add_argument('--max-total-mib', type=int, default=8192)
+    q = cmd('diff', 'Compare two APK ZIPs without modifying them', diff)
+    q.add_argument('old'); q.add_argument('new')
+    zip_limits(q)
     q = cmd('inventory', 'List asset and native library paths', inventory)
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive path substring')
     q.add_argument('--text', help='Search UTF-8 asset contents (bounded and case-insensitive)')
+    q.add_argument('--split-awareness', action='store_true', help='Infer split requirements from the literal binary manifest')
     q.add_argument('--hash', action='store_true', help='Compute SHA-256 for matching files (all APK entry CRCs are always checked)')
     q.add_argument('--native-details', action='store_true', help='Run readelf for matching native libraries')
     q.add_argument('--native-symbols', action='store_true', help='Index available native symbol tables with readelf')
     zip_limits(q)
     q = cmd('dex', 'Index DEX classes, methods, API references, strings, URLs, and possible models', dex)
+    q.add_argument('--check-integrity', action='store_true', help='Check supported DEX header SHA-1 and Adler-32')
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive substring filter')
     q.add_argument('--limit', type=int, default=200, help='Maximum entries per list (default 200)')
     zip_limits(q)
@@ -630,7 +831,7 @@ def main(argv: Any=None) -> int:
         r.setdefault('warnings', []).append('Installing or launching untrusted APKs can execute code and alter device state; use an isolated disposable emulator.')
     elif args.command == 'setup' and args.install:
         r.setdefault('warnings', []).append('Installing packages executes external code and modifies the system; review sources and use isolation.')
-    elif args.command in ('jadx', 'work', 'splits', 'inventory', 'inspect', 'dex'):
+    elif args.command in ('jadx', 'work', 'splits', 'inventory', 'inspect', 'dex', 'diff'):
         r.setdefault('warnings', []).append('External tools may process untrusted input; process cleanup and output limits are not a sandbox.')
     try:
         emit(r, args.report, args.summary, args.redact)

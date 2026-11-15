@@ -30,6 +30,24 @@ class SplitXapkUpdateTests(unittest.TestCase):
             with patch('apklab.cli.inspect_one', return_value=identity), patch('apklab.cli.read_dependencies', return_value={'status':'observed','uses_splits':['feature'], 'is_split_required':True}):
                 code, r = self.call('inspect',str(apk))
             self.assertEqual(code,1); self.assertTrue(any('Missing declared' in x['detail'] for x in r['failures']))
+    def test_duplicate_json_keys_rejected_across_xapk_operations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); xapk = root / 'source.xapk'
+            manifests = (
+                '{"split_apks":[{"file":"missing.apk"}],"split_apks":[{"file":"base.apk"}]}',
+                '{"split_apks":[{"file":"missing.apk","file":"base.apk"}]}',
+            )
+            for index, manifest in enumerate(manifests):
+                with zipfile.ZipFile(xapk, 'w') as z:
+                    z.writestr('base.apk', b'synthetic'); z.writestr('manifest.json', manifest)
+                for command in ('inspect', 'unpack', 'repack'):
+                    target = root / ('out-%s-%s' % (index, command))
+                    args = ['xapk', command, str(xapk)] + ([] if command == 'inspect' else [str(target)])
+                    code, result = self.call(*args)
+                    self.assertEqual(code, 1, result)
+                    self.assertTrue(any('Duplicate JSON key' in x['detail'] for x in result['failures']), result)
+                    if command != 'inspect': self.assertFalse(target.exists())
+
     def test_update_manifest_and_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); apk = root/'new.apk'; xapk = root/'source.xapk'

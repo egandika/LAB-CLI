@@ -16,9 +16,11 @@ APKLab helps inspect Android packages, explore DEX and assets, and prepare modif
 | `setup` | Show a plan or attempt a limited installation through APT. |
 | `inspect` | Check APK ZIPs, native ABIs, metadata, and signatures, including multiple splits. |
 | `xapk` | Inspect, extract, or repack an XAPK without overwriting the original. |
+| `apks` | List APK set archive contents without selecting splits. |
 | `dex` | Index DEX identifiers, manifest permissions/components, and heuristic obfuscation hints. |
 | `jadx` | Decompile a temporary APK copy to a new output directory with monitored limits. |
 | `inventory` | List assets and native libraries; search bounded text and inspect native symbols. |
+| `diff` | Compare entries in two APK files without modifying them. |
 | `work` | Create a copy-based workspace for apktool/JADX, rebuilding, alignment, signing, and verification. |
 | `splits` | Apply copy-based workflow stages across multiple APKs. |
 | `device` | Opt in to installation and optional launcher-event tests on a disposable emulator. |
@@ -101,16 +103,37 @@ Android tool discovery prefers `PATH`, then Android SDK roots in `ANDROID_SDK_RO
 ```sh
 apklab inspect app.apk
 apklab inspect base.apk split_config.arm64_v8a.apk
+apklab inspect base.apk split_config.arm64_v8a.apk --split-types
+apklab inspect app.apk --zip-alignment 16
+apklab inspect app.apk --manifest-security
+apklab inspect app.apk --signing-details
 apklab inspect ./split-directory --recursive --device-abi arm64-v8a --report inspection.json
 apklab dex app.apk --search login --limit 50
+apklab dex app.apk --check-integrity
+apklab diff old.apk new.apk
 apklab jadx app.apk ./jadx-output --timeout 600 --max-output-mib 128
 apklab inventory app.apk --search lib --native-details --native-symbols --hash
+apklab inventory base.apk --split-awareness
 apklab inventory app.apk --text 'example.org'
 ```
 
-`inspect`, `dex`, and `inventory` require an APK ZIP with exactly one root manifest and check every entry CRC within the configured ZIP limits. These checks do not validate manifest contents or APK signatures. `inspect` also lists native ABI directories. With `aapt` and `apksigner`, it also reads metadata and verifies signatures. Without `aapt`, a bounded internal binary-AXML parser attempts literal package, version, permission and component metadata and labels it as an inference; resources and split identity are not resolved. Unsupported or malformed manifests remain untested. For inspected APKs, explicit `uses-split`, `configForSplit` and a base’s `isSplitRequired` are checked where readable; missing declarations or resources remain untested and do not establish completeness. For multiple APKs, available package names, version codes, and certificate digest sets are compared, and duplicate non-empty split names reported by `aapt` are flagged. Unavailable checks are marked `not_tested`; matching digests do not prove that a split set is complete or compatible. Base selection, split dependencies, device compatibility, signer rotation, and installation are not fully validated.
+`inspect`, `dex`, and `inventory` require an APK ZIP with exactly one root manifest and check every entry CRC within the configured ZIP limits. These checks do not validate manifest contents or APK signatures. `inspect` also lists native ABI directories. With `aapt` and `apksigner`, it also reads metadata and verifies signatures. Without `aapt`, a bounded internal binary-AXML parser attempts literal package, version, permission and component metadata and labels it as an inference; resources and confirmed split identity are not resolved; `--split-types` may use a literal split attribute as an inference for its base candidate. Unsupported or malformed manifests remain untested. For inspected APKs, explicit `uses-split`, `configForSplit` and a base’s `isSplitRequired` are checked where readable; missing declarations or resources remain untested and do not establish completeness. For multiple APKs, available package names, version codes, and certificate digest sets are compared; mismatches involving internal AXML package/version data are inferences, not verified failures, and duplicate non-empty split names reported by `aapt` are flagged. Unavailable checks are marked `not_tested`; matching digests do not prove that a split set is complete or compatible. Base selection, split dependencies, device compatibility, signer rotation, and installation are not fully validated.
+
+With `--split-types`, `inspect` first copies every selected input to a temporary directory and performs inspection on those copies. It reads literal root `android:requiredSplitTypes` and `android:splitTypes` with `aapt` if available, or with the bounded internal AXML parser if `aapt` is missing or fails. It compares the base candidate's declared required types with the union of types observed in the supplied APKs, only if base identity and package/version metadata are sufficiently clear and all relevant attributes can be read. Known conflicting `versionCodeMajor` values prevent the comparison; an unavailable major-version comparison is separately marked untested, and the type comparison is an inference rather than a verified failure. Absent and empty attributes contribute no types; resource references, ambiguous namespaces, duplicates, truncated output, unreadable metadata, and unsupported values are untested. Literals from `aapt` are recorded as verified observations; all internal AXML observations and comparisons are inferences. A missing type from an all-`aapt` comparison is a failure for the supplied inputs, while a missing type inferred with internal AXML is not a verified failure. Additional splits may be required: a match does not establish set completeness, device selection, installability, or runtime behavior. No manifest is edited or split selected automatically. Temporary copies require sufficient disk space; physical copy limits default to 512 MiB per file, 2048 MiB total, and 1000 inputs. The first two can be adjusted with `--max-copy-mib` and `--max-copy-total-mib`; they are separate from uncompressed ZIP limits.
+
+`inspect --signing-details` reports explicit per-scheme results from a successful, complete `apksigner verify --verbose` invocation, when available. Missing, false, ambiguous or truncated scheme results are not treated as verified. Certificate trust, signer lineage and external `.idsig` sidecars are not independently checked.
+
+`inspect --manifest-security` inventories selected explicit application and component attributes using partial internal AXML as inferences. Absent fields are not assigned Android defaults; inheritance, SDK-specific behavior, code-level checks, and vulnerability status remain untested.
+
+`inspect --zip-alignment 16` observes the local ZIP data offset of each stored `lib/*/*.so`; compressed libraries are untested for mmap alignment. This checks neither other entries nor ELF alignment and is not a substitute for `zipalign` or runtime testing.
 
 When metadata is available, `inspect` lists APKs without a reported split name as **base candidates**, not confirmed bases. `--device-abi` compares native directory names only; it does not establish compatibility or select the correct splits.
+
+`dex --check-integrity` compares SHA-1 and Adler-32 header values for supported DEX 035 and 037–040; DEX 041 container integrity is untested. These checks do not authenticate origin or validate bytecode behavior.
+
+`diff` compares SHA-256 and ZIP sizes per entry in two validated APKs and reports native ABI directory names and readable package/version literals as AXML inferences. Duplicate entry names are rejected. It does not compare split sets, signatures, runtime behavior, or decoded resource semantics.
+
+`inventory --split-awareness` reads literal `requiredSplitTypes` with the partial internal AXML parser as an inference, and marks other APKs and legacy `isSplitRequired` untested. An empty inventory or absent declaration never proves the whole app has no native libraries or assets.
 
 `dex` indexes classes and method references, not runtime behavior or call graphs. It reads DEX versions 035 and 037–040 and validates indexed ranges and Modified UTF-8, but does not fully validate DEX files, checksums, or executable code; DEX 041 containers are unsupported and reported per file as `not_tested` after only a limited header check; malformed or truncated headers are failures. It lists named permissions and components from `aapt` XML-tree output or, when unavailable, as inferences from a partial internal binary-AXML parser; truncated stdout is explicitly marked partial and is not presented as a complete manifest; resource references and dynamically registered components can be missed. Short class names and encoded-looking strings are heuristics only and can be false positives. `inventory --hash` streams matching entries, computes SHA-256 and checks ZIP CRC; magic-byte labels are hints, not file validation. URLs and model names are hints, not proof that a server is active or that model definitions are complete. Obfuscation, encrypted strings, dynamic DEX, and native code can hide information. `inventory --native-symbols` uses `readelf`; symbols may be stripped. `--text` searches UTF-8 assets/resources only, skips binary or entries over 1 MiB, reads at most 32 MiB total, and returns at most 200 excerpts. Results may contain sensitive data.
 
@@ -118,6 +141,7 @@ When metadata is available, `inspect` lists APKs without a reported split name a
 
 ```sh
 apklab xapk inspect game.xapk --verify
+apklab xapk inspect game.xapk --check-apks
 apklab xapk unpack game.xapk ./xapk-copy
 apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 ```
@@ -126,7 +150,9 @@ apklab inspect ./xapk-copy --recursive --max-entry-mib 2048 --max-total-mib 8192
 
 `xapk inspect` lists entries; `--verify` reads each file, checks CRC, and computes SHA-256. `unpack` only reads the original archive and copies its contents into a **new** directory, checking CRC and hashes. Path traversal, duplicate or colliding paths, symlinks, special files, encrypted entries, and size-limit violations are rejected.
 
-APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. This does not validate manifest completeness, all APK contents, or OBB compatibility. Unpack and repack stage their outputs and validate supported manifest references before publishing; a manifest failure prevents publication. Unsupported manifest formats remain untested.
+`xapk inspect --check-apks` copies at most 1000 contained APKs (512 MiB each, 2048 MiB total) to temporary files, checks APK ZIPs using the requested ZIP limits (capped at 512 MiB per inner entry and 2048 MiB total per APK) and compares supported declared `size`/`sha256` fields. It reads available metadata and optionally verifies signatures with installed tools; absent or unsupported fields are untested. Hash matches do not authenticate the publisher, and this does not establish split completeness or OBB compatibility.
+
+APK references in a root `manifest.json` with a supported `split_apks` list are compared with entry names; other formats are marked untested. Duplicate JSON keys at any depth are rejected as ambiguous. This does not validate manifest completeness, all APK contents, or OBB compatibility. Unpack and repack stage their outputs and validate supported manifest references before publishing; a manifest failure prevents publication. Unsupported manifest formats remain untested.
 
 To create a **new** XAPK and replace selected APK entries with copies you have rebuilt and signed:
 
@@ -139,7 +165,7 @@ apklab xapk repack game.xapk ./new-output --directory --replace base.apk=/path/t
 
 Repeat `--replace ENTRY=APK` for other APKs. Source paths are read-only, replacements use the same APK ZIP checks as `inspect`, including exactly one root `AndroidManifest.xml` and CRC checks. OBB and other entries are copied unchanged. By default the manifest is **not rewritten**; version, size or checksum fields may be stale. With `--update-manifest`, a supported `split_apks` list must uniquely declare each replacement; the command writes each replacement’s `size` and `sha256` fields, refusing ambiguous declarations and recognized unsupported checksum fields. Other manifest fields and checksum schemas are not validated or updated. In `--directory` mode the new directory contains `repacked.xapk` and copies of declared OBBs under `Android/obb/PACKAGE/`. It requires a supported `package_name` and `expansions` list, validates OBB filename, location, and a one-to-one match with archive entries, and rejects unsupported, missing or undeclared OBBs. This validates placement only, not OBB contents or compatibility. Signature compatibility, installer support, device-specific split selection, and app behavior are not verified.
 
-Default APK limits are 100,000 entries, 64 MiB per entry, and 512 MiB total uncompressed. For XAPK, the default size limits are 2,048 MiB per entry and 8,192 MiB total. Adjust them deliberately with `--max-entry-mib` and `--max-total-mib`; higher limits may use substantial memory, CPU, and disk space. CRC is not a substitute for signature verification. `.apks` containers are not extracted automatically.
+Default APK limits are 100,000 entries, 64 MiB per entry, and 512 MiB total uncompressed. For XAPK, the default size limits are 2,048 MiB per entry and 8,192 MiB total. Adjust them deliberately with `--max-entry-mib` and `--max-total-mib`; higher limits may use substantial memory, CPU, and disk space. CRC is not a substitute for signature verification. `.apks` containers are not extracted automatically. Use `apklab apks inspect release.apks --verify` to list safe ZIP entries and check their CRCs; inner APK validity and `toc.pb` targeting are not parsed, and no device-specific splits are selected.
 
 ### Copy-based modification workflow
 
@@ -157,7 +183,7 @@ apklab inspect ./apklab-work-example/signed.apk
 
 The workspace must be new; `original.apk` is a copy. Stages use separately installed `apktool`, `jadx`, `zipalign`, and `apksigner`. `work jadx` writes decompiled Java into a new workspace directory; its output is for analysis, not a rebuildable source project. Outputs must be new and inside the workspace; `--input` and `--output` can change paths within it. Set the password in an environment variable using a secure local method, not in commands, reports, or Git. Separate key passwords and hardware tokens are not supported.
 
-`work align --page-size 16` requires a `zipalign` version advertising `-P` support, such as Android build tools 35.0.0 or later. It aligns uncompressed native libraries in the ZIP; it **does not verify ELF load-segment alignment**, overall 16 KiB device compatibility, or runtime behavior. Alignment defaults to 4 KiB. `work verify` independently runs both 4 KiB and 16 KiB ZIP checks plus `apksigner verify`; it also parses ELF program headers for each `lib/*/*.so` and checks LOAD `p_align` and offset/address congruence at 16 KiB. Unsupported ELF forms are not tested; malformed or insufficiently aligned libraries are failures. a missing tool or unsupported 16 KiB check is `not_tested`. The verification `--page-size` option is retained for compatibility but both checks run regardless; the JSON report records this policy. In `splits run`, the option selects alignment for the `align` stage only; `verify` attempts both checks.
+`work align --page-size 16` requires a `zipalign` version advertising `-P` support, such as Android build tools 35.0.0 or later. It aligns uncompressed native libraries in the ZIP; it **does not verify ELF load-segment alignment**, overall 16 KiB device compatibility, or runtime behavior. Alignment defaults to 4 KiB. `work verify` independently runs both 4 KiB and 16 KiB ZIP checks plus `apksigner verify`, with distinct report messages for ZIP and signature checks; it also parses ELF program headers for each `lib/*/*.so` and checks LOAD `p_align` and offset/address congruence at 16 KiB. Unsupported ELF forms are not tested; malformed or insufficiently aligned libraries are failures. a missing tool or unsupported 16 KiB check is `not_tested`. The verification `--page-size` option is retained for compatibility but both checks run regardless; the JSON report records this policy. In `splits run`, the option selects alignment for the `align` stage only; `verify` attempts both checks.
 
 Test installation and behavior only on an authorized, isolated device or emulator. A different signing key may prevent updates to the original app or affect integrations. Not every APK can be rebuilt unchanged with apktool; failed builds report available tool diagnostics and suggest reviewing versions, frameworks, and resource edits.
 
@@ -176,7 +202,7 @@ apklab splits run ./split-work verify --page-size 16
 apklab inspect ./split-work/apk-0000/signed.apk ./split-work/apk-0001/signed.apk
 ```
 
-`splits run verify` independently inspects each signed output with `aapt` and `apksigner`, records signer digests and selected manifest declarations (`uses-split`, `configForSplit`, `isFeatureSplit`, `isSplitRequired`, and `versionCodeMajor`), and reports known signer, package, version and dependency contradictions. Missing or truncated metadata is marked untested, not treated as proof of completeness. Every signing operation uses the supplied keystore and alias; original-copy SHA-256 values are checked before each stage. Stages may partially succeed: read each member report. Existing outputs are never overwritten; use a new workspace or handle failed members individually. Set completeness, installer compatibility, device targeting, and behavior are not guaranteed.
+`splits run verify` independently inspects each signed output with `aapt` and `apksigner`, records signer digests and selected manifest declarations (`uses-split`, `configForSplit`, `isFeatureSplit`, `isSplitRequired`, and `versionCodeMajor`), and reports known signer, package, version, dependency and modern split-type contradictions. Missing or truncated metadata is marked untested, not treated as proof of completeness. Every signing operation uses the supplied keystore and alias; original-copy SHA-256 values are checked before each stage. Stages may partially succeed: read each member report. Existing outputs are never overwritten; use a new workspace or handle failed members individually. Set completeness, installer compatibility, device targeting, and behavior are not guaranteed.
 
 ### Disposable-emulator test
 
@@ -187,7 +213,7 @@ apklab device --serial emulator-5554 --confirm-install ./apklab-work-example/sig
 # Add --launch only when you intend to execute app code.
 ```
 
-For split sets, supply the base and all required split APK paths. The command requires `adb`, `aapt`, and `apksigner`; checks emulator identity, package/version/signer consistency and observed split dependencies, and refuses an already installed package. A known missing dependency blocks installation; unavailable or incomplete dependency metadata is reported as untested and does not establish completeness. It does not install OBBs, select splits, uninstall the app, or prove app functionality. A launcher event is not proof of successful execution. Failure may leave a partially changed emulator; discard the disposable emulator when finished.
+For split sets, supply the base and all required split APK paths. The command requires `adb`, `aapt`, and `apksigner`; checks emulator identity, package/version/signer consistency and observed split dependencies, and refuses an already installed package. A known missing dependency or verified missing required split type blocks installation; unavailable or incomplete dependency metadata is reported as untested and does not establish completeness. Truncated or incomplete ADB safety-check output blocks installation; incomplete install/launch output is not treated as success, and an unconfirmed install may still have changed device state. It does not install OBBs, select splits, uninstall the app, or prove app functionality. A launcher event is not proof of successful execution. Failure may leave a partially changed emulator; discard the disposable emulator when finished.
 
 ### Reports
 
@@ -223,7 +249,9 @@ APKLAB_INTEGRATION_APK=/path/to/authorized-test.apk python3 -m unittest discover
 
 Without `APKLAB_INTEGRATION_APK`, this test is skipped. When enabled, missing required tools cause failure. Set `APKLAB_TEST_16K=1`, `APKLAB_TEST_JADX=1`, or `APKLAB_TEST_SPLITS=1` to opt into the corresponding checks. The split option requires `ANDROID_HOME` with an installed platform `android.jar`; it generates and signs separate synthetic base and `config.en` APKs, checks their reported identities and runs the split workflow. This does not establish that the split set installs or works on a device. `APKLAB_EMULATOR_SERIAL=emulator-5554` additionally installs and launches the test APK on that emulator. When both this option and `APKLAB_TEST_SPLITS=1` are set, the test also attempts `install-multiple` for the generated signed split set without launching it. Only use a disposable, isolated emulator.
 
-GitHub Actions is configured for Python 3.9 through 3.13 cross-platform unit tests, real Android tools, and a disposable-emulator test using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. An earlier CI run exercised JADX, a 16 KiB ZIP-aligned native entry, a two-copy workflow, XAPK repacking, and installation and a launcher event on an API 30 emulator. The split integration fixture has since changed; consult the current workflow results before claiming the updated fixture passed. installing or launching a sample does not prove that another APK or game will work.
+The optional real-tool split fixture uses separate canonical `AndroidManifest.xml` paths for aapt; its command construction also has mock regression coverage. The emulator CI job selects preinstalled Android build-tools 35.0.0 rather than Ubuntu aapt for compatibility with the runner SDK.
+
+GitHub Actions is configured for Python 3.9 through 3.13 cross-platform unit tests, real Android tools, and a disposable-emulator test using a checksum-pinned [public Androguard test APK](https://github.com/androguard/androguard/blob/0c0af30ca6bd55d3d34aa10d7f32593cd091a483/tests/data/APK/TestActivity.apk), which is not committed here. An earlier CI run exercised JADX, a 16 KiB ZIP-aligned native entry, a two-copy workflow, XAPK repacking, and installation and a launcher event on an API 30 emulator. The split integration fixture has since changed; consult the current workflow results before claiming the updated fixture passed. CI publishes bounded failure diagnostics as annotations for both unit and integration jobs; annotations may contain test output and should be reviewed before sharing. installing or launching a sample does not prove that another APK or game will work.
 
 ## License
 

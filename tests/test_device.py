@@ -55,6 +55,54 @@ class DeviceTests(unittest.TestCase):
             with patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=self.fake_run):
                 code, r = self.call('device','--serial','emulator-5554','--confirm-install',str(self.apk))
             self.assertEqual(code, 1, r); self.assertFalse(any('install' in c for c in self.calls))
+    def test_refuses_incomplete_safety_outputs(self):
+        for command in ('get-state', 'emu', 'getprop', 'users', 'packages'):
+            for flag in ('stdout_truncated', 'capture_incomplete'):
+                self.calls.clear()
+                def run(args, timeout=120):
+                    result = self.fake_run(args, timeout)
+                    if command in args: result[flag] = True
+                    return result
+                with self.subTest(command=command, flag=flag), patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=run):
+                    code, result = self.call('device', '--serial', 'emulator-5554', '--confirm-install', str(self.apk))
+                self.assertEqual(code, 1, result)
+                self.assertFalse(any('install' in call or 'install-multiple' in call for call in self.calls))
+
+    def test_truncated_install_or_launch_is_not_verified(self):
+        for command in ('install', 'monkey'):
+            self.calls.clear()
+            def run(args, timeout=120):
+                result = self.fake_run(args, timeout)
+                if command in args: result['stdout_truncated'] = True
+                return result
+            with self.subTest(command=command), patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=run):
+                code, result = self.call('device', '--serial', 'emulator-5554', '--confirm-install', '--launch', str(self.apk))
+            self.assertEqual(code, 1, result)
+            self.assertFalse(any(x['subject'] == ('installation' if command == 'install' else 'launch') for x in result['verified']))
+            if command == 'install':
+                self.assertTrue(any('not confirmed' in x['detail'] and 'may have changed' in x['detail'] for x in result['failures']))
+
+    def test_modern_split_type_block_and_unknowns(self):
+        from apklab.split_metadata import parse_split_types
+        for mode in ('missing', 'matching', 'truncated', 'fallback', 'partial-major'):
+            self.calls.clear()
+            text = 'E: manifest\n  A: android:requiredSplitTypes="base__abi"\n'
+            if mode == 'matching': text += '  A: android:splitTypes="base__abi"\n'
+            observation = parse_split_types(text, truncated=mode == 'truncated')
+            if mode == 'fallback':
+                observation['source'] = 'internal_axml'
+                observation['split_identity'] = {'status': 'absent'}
+            dep = {'status': 'partial' if mode == 'partial-major' else 'observed'}
+            with self.subTest(mode=mode), patch('apklab.device.find_tool', side_effect=self.find), patch('apklab.device.inspect_one', side_effect=self.inspect), patch('apklab.device.run', side_effect=self.fake_run), patch('apklab.device.read_dependencies', return_value=dep), patch('apklab.device.read_split_types', return_value=observation):
+                code, result = self.call('device', '--serial', 'emulator-5554', '--confirm-install', str(self.apk))
+            installed = any('install' in call for call in self.calls)
+            self.assertEqual(installed, mode != 'missing', result)
+            self.assertEqual(code, 1 if mode == 'missing' else 3, result)
+            if mode == 'missing': self.assertTrue(any(x['subject'] == 'split types' for x in result['failures']))
+            if mode in ('truncated', 'fallback', 'partial-major'):
+                self.assertTrue(any(x['subject'] == 'split types' for x in result['not_tested']))
+                self.assertFalse(any(x['subject'] == 'split types' for x in result['verified'] + result['failures']))
+
     def test_refuses_unverified_signer(self):
         def inspect(path, r):
             item = self.inspect(path, r); item['signer_sha256'] = None; return item

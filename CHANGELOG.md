@@ -2,6 +2,52 @@
 
 ## 0.5.0 (unreleased)
 
+- Select preinstalled Android build-tools 35 for emulator integration to match the real-tool job.
+
+- Fix real-tool split fixture manifest filenames for aapt; cover fixture commands with a mock regression test.
+
+- Apply bounded inner ZIP expansion limits when inspecting contained XAPK APKs.
+
+- Include native ABI directory observations and compression method in APK diffs.
+
+- Check supported DEX header SHA-1 and Adler-32 integrity without claiming authenticity.
+
+- Report explicit per-scheme apksigner verification results when available.
+
+- Inventory selected explicit manifest security attributes as partial AXML inferences, not vulnerability verdicts.
+
+- Add read-only APK set archive inventory without device targeting or extraction.
+
+- Add read-only per-entry APK diff with bounded ZIP validation and inferred metadata.
+
+- Add offline per-library 16 KiB ZIP data-offset observations for existing APKs.
+
+- Add bounded inspection of contained XAPK APKs and comparison of supported size/SHA-256 declarations.
+
+- Add optional split-aware inventory scope warnings using partial internal AXML inference.
+
+- Clarify that an unconfirmed ADB install may still have changed emulator state.
+
+- Clarify that internal AXML may infer, but does not confirm, a base candidate.
+
+- Publish bounded integration-test failure diagnostics in CI annotations; this does not establish that Android integration passes.
+
+- Apply modern split type checks to signed split outputs and opt-in device installation; block only verified missing types, and retain unknowns as untested.
+
+- Correct the apksigner success message in workspace verification reports.
+
+- Bound physical input-copy size and count for opt-in split type inspection.
+
+- Avoid split-type comparisons for known conflicting major version codes and report unverified major versions.
+
+- Preserve internal AXML provenance for split package/version mismatches and avoid duplicate mismatch reports.
+
+- Reject duplicate JSON keys in XAPK manifests in inspection, unpacking, repacking, and OBB layout checks.
+
+- Fail closed on truncated or incomplete ADB safety-check output and do not verify incomplete install/launch output.
+
+- Add opt-in copy-based inspection of modern literal split types, with conservative unknowns and internal AXML inferences; no split selection or completeness claim.
+
 - Expand the CI Python matrix to 3.9–3.13 and annotate public module functions.
 - Fail safely when APT installation is requested on hosts without POSIX user IDs; compare resolved paths in portable staging tests. Windows behavior remains unverified natively.
 - Lower and sample JADX output caps more frequently (best effort), add optional report redaction, and warn about untrusted execution.

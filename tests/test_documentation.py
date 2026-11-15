@@ -8,3 +8,11 @@ class DocumentationTests(unittest.TestCase):
                        'xapk repack game.xapk ./new-output --directory', 'ELF segment alignment',
                        '**3** (no failures', 'untested entries'):
             with self.subTest(phrase=phrase): self.assertIn(phrase, readme)
+
+    def test_axml_identity_inference_is_not_a_confirmed_base(self):
+        root = Path(__file__).resolve().parents[1]
+        readme = (root / 'README.md').read_text(encoding='utf-8')
+        agents = (root / 'AGENTS.md').read_text(encoding='utf-8')
+        self.assertIn('infer a base candidate', agents)
+        self.assertIn('does not resolve resources or confirm split identity', agents)
+        self.assertIn('as an inference for its base candidate', readme)

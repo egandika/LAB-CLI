@@ -52,7 +52,9 @@ class AndroidToolIntegration(unittest.TestCase):
         (resources / 'strings.xml').write_text('<resources><string name="fixture_label">English</string></resources>', encoding='utf-8')
         signed = []
         for name, xml in manifests.items():
-            manifest = root / (name + '.xml')
+            manifest_dir = root / ('manifest-' + name)
+            manifest_dir.mkdir()
+            manifest = manifest_dir / 'AndroidManifest.xml'
             manifest.write_text(xml, encoding='utf-8')
             unsigned = root / (name + '-unsigned.apk')
             apk = root / (name + '.apk')
