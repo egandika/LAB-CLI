@@ -106,12 +106,14 @@ def read_dependencies(apk: Union[str, PathLike]) -> dict:
 
 def assess_outputs(records: Any) -> dict:
     """Compare known facts and explicit references; unknowns never imply completeness."""
-    issues, unknown = [], []
+    issues, unknown, inferences = [], [], []
     apks = [record.get('apk') for record in records]
     for field, label in (('package', 'package names'), ('version_code', 'version codes'), ('signer_sha256', 'signer certificate digest sets')):
         values = [apk.get(field) if apk else None for apk in apks]
         known = {tuple(value) if isinstance(value, list) else value for value in values if value}
-        if len(known) > 1: issues.append('Different ' + label + ' found')
+        if len(known) > 1:
+            inferred = field != 'signer_sha256' and any(apk and apk.get('metadata_source') == 'internal_axml' and apk.get(field) for apk in apks)
+            (inferences if inferred else issues).append('Different ' + label + ' found' + (' (includes internal AXML)' if inferred else ''))
         if len(known) == 0 or any(not value for value in values): unknown.append(label)
     names_known = all(apk and apk.get('package') and apk.get('version_code') and 'split' in apk for apk in apks)
     names = [apk.get('split') for apk in apks if apk and apk.get('package') and apk.get('version_code') and 'split' in apk]
@@ -169,7 +171,7 @@ def assess_outputs(records: Any) -> dict:
                 state[target] = 1; stack.append((target, iter(edges[target])))
         if cyclic: break
     if cyclic: issues.append('Cycle in declared split dependencies')
-    return {'issues': issues, 'unknown': unknown,
+    return {'issues': issues, 'unknown': unknown, 'inferences': inferences,
             'note': 'Observed declarations and signer digests do not establish split completeness, signer rotation compatibility, installability, or runtime behavior.'}
 
 # These attributes are comma-separated names, not split APK filenames.

@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Preserve internal AXML provenance for split package/version mismatches and avoid duplicate mismatch reports.
+
 - Reject duplicate JSON keys in XAPK manifests in inspection, unpacking, repacking, and OBB layout checks.
 
 - Fail closed on truncated or incomplete ADB safety-check output and do not verify incomplete install/launch output.

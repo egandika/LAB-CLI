@@ -164,12 +164,10 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
         for field, label in [('package', 'package names'), ('version_code', 'version codes'), ('signer_sha256', 'signer certificate digest sets')]:
             values = [tuple(a[field]) if field == 'signer_sha256' and a[field] else a[field] for a in r['apks']]
             known = {v for v in values if v}
-            if len(known) > 1:
-                add(r, 'failures', 'split set', 'Different ' + label + ' found')
-            elif len(known) == 1 and all(values):
+            if len(known) == 1 and all(values):
                 category = 'inferences' if field != 'signer_sha256' and any(a.get('metadata_source') == 'internal_axml' for a in r['apks']) else 'verified'
                 add(r, category, 'split set', 'Matching ' + label + ' across all inspected APKs')
-            else:
+            elif len(known) <= 1:
                 add(r, 'not_tested', 'split set', 'Cannot compare ' + label + ' for every APK')
         split_names = [a.get('split') for a in r['apks'] if a.get('split')]
         if all(a.get('package') and 'split' in a for a in r['apks']):
@@ -187,6 +185,7 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
     r['split_observations'] = observations
     r['split_analysis'] = assess_outputs(observations)
     for issue in r['split_analysis']['issues']: add(r, 'failures', 'split set', issue)
+    for inference in r['split_analysis']['inferences']: add(r, 'inferences', 'split set', inference)
     for unknown in r['split_analysis']['unknown']:
         add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
     if getattr(args, 'split_types', False):
@@ -575,6 +574,7 @@ def splits(args: argparse.Namespace, _report: Any) -> dict:
         analysis = assess_outputs(observations)
         r['split_analysis'] = analysis
         for issue in analysis['issues']: add(r, 'failures', 'split set', issue)
+        for inference in analysis['inferences']: add(r, 'inferences', 'split set', inference)
         for unknown in analysis['unknown']: add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every output')
     add(r, 'not_tested', 'split set', 'Operations may partially succeed; completeness, signer rotation compatibility, installability and runtime behavior are not verified')
     return r

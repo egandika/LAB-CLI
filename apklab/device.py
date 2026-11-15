@@ -69,6 +69,8 @@ def install_test(serial: str, apks: Any, confirm: bool=False, launch: bool=False
             for issue in analysis['issues']: add(r, 'failures', 'split set', issue)
             add(r, 'not_tested', 'installation', 'Installation was blocked by split metadata checks')
             return r
+        for inference in analysis['inferences']:
+            add(r, 'inferences', 'split set', inference)
         for unknown in analysis['unknown']:
             add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
         package = next(iter(packages))

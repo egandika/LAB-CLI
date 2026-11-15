@@ -176,6 +176,16 @@ class SplitTypeCliTests(unittest.TestCase):
         _, r, _ = self.call([base, broken])
         self.assertTrue(r['split_types']['unknown']); self.assertIsNone(r['split_types']['missing'])
         self.assertFalse(any(x['subject'] == 'split types' for x in r['failures'] + r['verified']))
+    def test_fallback_identity_mismatch_is_inference_not_failure(self):
+        base = self.apk('base.apk', manifest([]))
+        data = manifest([(None, 'split', 3, 'config.en')]).replace(b'org.example', b'org.Example')
+        split = self.apk('split.apk', data)
+        code, result, _ = self.call([base, split])
+        self.assertEqual(code, 3, result)
+        self.assertFalse(any('Different package' in x['detail'] for x in result['failures']))
+        self.assertEqual(sum('Different package' in x['detail'] for x in result['inferences']), 1)
+        self.assertTrue(result['split_types']['unknown'])
+
     def test_empty_and_absent_fallback_attributes(self):
         base = self.apk('base.apk', manifest([(ANDROID, 'requiredSplitTypes', 3, '')]))
         _, r, _ = self.call([base])
