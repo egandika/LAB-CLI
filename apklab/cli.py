@@ -190,13 +190,13 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
         add(r, 'not_tested', 'split set', 'Unable to compare ' + unknown + ' for every input')
     if getattr(args, 'split_types', False):
         type_records = []
-        for item in r['apks']:
+        for item, prior in zip(r['apks'], observations):
             if 'entries' not in item:
                 observation = {'source': 'unavailable', 'reason': 'APK ZIP validation did not succeed',
                                'attributes': {name: {'status': 'unknown', 'reason': 'input unavailable'} for name in ('requiredSplitTypes', 'splitTypes')}}
             else:
                 observation = read_split_types(item['file'])
-            type_records.append({'id': item['file'], 'apk': item, 'types': observation})
+            type_records.append({'id': item['file'], 'apk': item, 'types': observation, 'dependencies': prior['dependencies']})
             for name, attribute in observation['attributes'].items():
                 if attribute['status'] == 'literal':
                     category = 'inferences' if observation['source'] == 'internal_axml' else 'verified'
@@ -208,7 +208,7 @@ def _inspect_inputs(args: argparse.Namespace, _report: Any) -> dict:
         r['split_type_observations'] = [{'file': record['id'], **record['types']} for record in type_records]
         analysis = assess_split_types(type_records)
         r['split_types'] = analysis
-        for reason in analysis['unknown']:
+        for reason in analysis['unknown'] + analysis['identity_not_tested']:
             add(r, 'not_tested', 'split types', reason)
         if not analysis['unknown']:
             if analysis['source'] == 'internal_axml':

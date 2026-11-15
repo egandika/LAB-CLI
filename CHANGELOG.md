@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Avoid split-type comparisons for known conflicting major version codes and report unverified major versions.
+
 - Preserve internal AXML provenance for split package/version mismatches and avoid duplicate mismatch reports.
 
 - Reject duplicate JSON keys in XAPK manifests in inspection, unpacking, repacking, and OBB layout checks.

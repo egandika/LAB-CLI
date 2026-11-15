@@ -129,6 +129,14 @@ class SplitTypeCliTests(unittest.TestCase):
         self.assertEqual(result['split_types']['provided'], ['base__abi'])
         self.assertEqual(result['split_types']['missing'], [])
 
+    def test_major_version_mismatch_blocks_type_comparison(self):
+        base = self.apk('base.apk', 'base:' + tree('"base__abi"', extra='  A: android:versionCodeMajor=(type 0x10)0x1\n'))
+        split = self.apk('split.apk', 'split:' + tree(provided='"base__abi"', extra='  A: android:versionCodeMajor=(type 0x10)0x2\n'))
+        _, result, _ = self.call([base, split], 'aapt')
+        self.assertTrue(any('versionCodeMajor' in x for x in result['split_types']['unknown']))
+        self.assertIsNone(result['split_types']['missing'])
+        self.assertFalse(any(x['subject'] == 'split types' for x in result['verified']))
+
     def test_resource_reference_is_unknown_and_never_failure(self):
         base = self.apk('base.apk', 'base:' + tree('"base__abi"'))
         split = self.apk('split.apk', 'split:' + tree(provided='@0x7f010001'))

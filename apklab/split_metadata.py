@@ -283,12 +283,20 @@ def assess_split_types(records: Any) -> dict:
     versions = [r['apk'].get('version_code') for r in records]
     if not all(packages) or not all(versions) or len(set(packages)) != 1 or len(set(versions)) != 1:
         unknown.append('package or version identity is unavailable or inconsistent')
+    # versionCodeMajor defaults to zero only when a complete manifest was observed.
+    major_values = [r.get('dependencies', {}) for r in records]
+    major_known = [d.get('version_code_major') or 0 for d in major_values if d.get('status') == 'observed']
+    if len(set(major_known)) > 1:
+        unknown.append('versionCodeMajor values are inconsistent')
+    identity_not_tested = []
+    if len(major_known) != len(records):
+        identity_not_tested.append('versionCodeMajor identity comparison is incomplete')
     for record in records:
         for name in _TYPE_IDS:
             attribute = record['types']['attributes'][name]
             if attribute['status'] == 'unknown':
                 unknown.append(str(record['id']) + ': ' + name + ' ' + attribute.get('reason', 'unknown'))
-    result = {'required': None, 'provided': None, 'missing': None, 'unknown': unknown,
+    result = {'required': None, 'provided': None, 'missing': None, 'unknown': unknown, 'identity_not_tested': identity_not_tested,
               'note': 'Comparison covers supplied APKs only; split completeness, installability and runtime are not established.'}
     if unknown:
         return result
