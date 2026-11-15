@@ -26,3 +26,6 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn('Exit 3 means at least one item is untested', agents)
         self.assertIn('before emulator installation or launch', agents)
         self.assertIn('`--check-apks` separately checks contained APK ZIPs', agents)
+        self.assertIn('run `doctor --check` only when probing local executables is permitted', agents)
+        self.assertIn('Ask before unpacking', agents)
+        self.assertIn('only when useful for the user’s objective', agents)

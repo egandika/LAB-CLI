@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Make baseline agent instructions goal-directed and consistent about permission for probes and extraction.
+
 - Link the triage skill to structured planning and clarify report option placement.
 
 - List supported agent-plan combinations in CLI help and document an optional plugin-host installation example.
