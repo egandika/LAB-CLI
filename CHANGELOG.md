@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Fix real-tool split fixture manifest filenames for aapt; cover fixture commands with a mock regression test.
+
 - Apply bounded inner ZIP expansion limits when inspecting contained XAPK APKs.
 
 - Include native ABI directory observations and compression method in APK diffs.
