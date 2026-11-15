@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Clarify agent permission, evidence and untrusted-input guidance; align the copyable prompt with setup approval.
+
 - Select preinstalled Android build-tools 35 for emulator integration to match the real-tool job.
 
 - Fix real-tool split fixture manifest filenames for aapt; cover fixture commands with a mock regression test.
