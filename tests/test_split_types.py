@@ -223,6 +223,21 @@ class SplitTypeCliTests(unittest.TestCase):
         self.assertEqual(sum('Different package' in x['detail'] for x in result['inferences']), 1)
         self.assertTrue(result['split_types']['unknown'])
 
+    def test_inventory_split_awareness_is_scoped_and_conservative(self):
+        for name, attrs in [('required', [(ANDROID, 'requiredSplitTypes', 3, 'base__abi')]),
+                            ('absent', []), ('reference', [(ANDROID, 'requiredSplitTypes', 1, 0x7f010001)])]:
+            apk = self.apk(name + '.apk', manifest(attrs)); original = apk.read_bytes(); out = io.StringIO()
+            with self.subTest(name=name), contextlib.redirect_stdout(out):
+                code = main(['inventory', str(apk), '--split-awareness', '--hash'])
+            result = json.loads(out.getvalue()); self.assertEqual(code, 3, result)
+            self.assertTrue(any(x['subject'] == 'inventory scope' for x in result['not_tested']))
+            if name == 'required': self.assertEqual(result['split_awareness']['required_split_types']['types'], ['base__abi'])
+            if name == 'reference': self.assertTrue(any(x['subject'] == 'inventory split awareness' for x in result['not_tested']))
+            self.assertEqual(apk.read_bytes(), original)
+        apk = self.apk('bad.apk', b'bad'); out = io.StringIO()
+        with contextlib.redirect_stdout(out): code = main(['inventory', str(apk), '--split-awareness'])
+        self.assertEqual(code, 3); self.assertEqual(json.loads(out.getvalue())['split_awareness']['source'], 'unavailable')
+
     def test_empty_and_absent_fallback_attributes(self):
         base = self.apk('base.apk', manifest([(ANDROID, 'requiredSplitTypes', 3, '')]))
         _, r, _ = self.call([base])

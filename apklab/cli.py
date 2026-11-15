@@ -313,6 +313,26 @@ def inventory(args: argparse.Namespace, _report: Any) -> dict:
                 matches.append(info)
                 r['files'].append({'path': n, 'size': info.file_size, 'category': category})
         add(r, 'verified', 'inventory', 'Indexed matching ZIP entry names and sizes')
+        if getattr(args, 'split_awareness', False):
+            from .axml import MAX_MANIFEST, parse_manifest
+            from .split_metadata import _type_values
+            try:
+                info = next(i for i in infos if i.filename == 'AndroidManifest.xml' and not i.is_dir())
+                if info.file_size > MAX_MANIFEST: raise ValueError('Manifest exceeds AXML limit')
+                manifest = parse_manifest(z.read(info))
+                attr = _type_values(manifest['split_type_attributes']['requiredSplitTypes'])
+                r['split_awareness'] = {'source': 'internal_axml', 'required_split_types': attr,
+                                        'scope': 'This APK only; other APKs were not inspected'}
+                if attr['status'] == 'literal' and attr.get('types'):
+                    add(r, 'inferences', 'inventory split awareness', 'Literal required split types observed via internal AXML; assets and native libraries may be in other APKs')
+                elif attr['status'] == 'unknown':
+                    add(r, 'not_tested', 'inventory split awareness', 'Required split types are unresolved')
+                else:
+                    add(r, 'inferences', 'inventory split awareness', 'No nonempty literal required split types observed via internal AXML')
+            except (ValueError, KeyError, OSError, zipfile.BadZipFile, RuntimeError) as exc:
+                r['split_awareness'] = {'source': 'unavailable', 'reason': str(exc)}
+                add(r, 'not_tested', 'inventory split awareness', 'Manifest could not be examined')
+            add(r, 'not_tested', 'inventory scope', 'Only this APK was inventoried; split completeness and isSplitRequired are not established')
         import hashlib
         for info, item in zip(matches, r['files']):
             if info.is_dir(): continue
@@ -635,6 +655,7 @@ def parser() -> argparse.ArgumentParser:
     q = cmd('inventory', 'List asset and native library paths', inventory)
     q.add_argument('apk'); q.add_argument('--search', help='Case-insensitive path substring')
     q.add_argument('--text', help='Search UTF-8 asset contents (bounded and case-insensitive)')
+    q.add_argument('--split-awareness', action='store_true', help='Infer split requirements from the literal binary manifest')
     q.add_argument('--hash', action='store_true', help='Compute SHA-256 for matching files (all APK entry CRCs are always checked)')
     q.add_argument('--native-details', action='store_true', help='Run readelf for matching native libraries')
     q.add_argument('--native-symbols', action='store_true', help='Index available native symbol tables with readelf')

@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Add optional split-aware inventory scope warnings using partial internal AXML inference.
+
 - Clarify that an unconfirmed ADB install may still have changed emulator state.
 
 - Clarify that internal AXML may infer, but does not confirm, a base candidate.
