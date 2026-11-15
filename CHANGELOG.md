@@ -2,6 +2,8 @@
 
 ## 0.5.0 (unreleased)
 
+- Clarify that internal AXML may infer, but does not confirm, a base candidate.
+
 - Publish bounded integration-test failure diagnostics in CI annotations; this does not establish that Android integration passes.
 
 - Apply modern split type checks to signed split outputs and opt-in device installation; block only verified missing types, and retain unknowns as untested.
